@@ -54,6 +54,18 @@ export async function GET(request: NextRequest) {
 
   const hasVideos = videoCount.count > 0;
 
+  // Reliability score
+  const scoreResult = await db.execute({
+    sql: `SELECT score, trust_score, performance_score,
+                 claim_accuracy_score, completeness_score, proof_score, behavioral_score
+          FROM reliability_scores WHERE cutter_id = ?`,
+    args: [cutterId],
+  });
+  const scoreRow = scoreResult.rows[0] as Record<string, unknown> | undefined;
+  const reliabilityScore = scoreRow ? Number(scoreRow.score) : 100;
+  const trustScore       = scoreRow ? Number(scoreRow.trust_score) : 0;
+  const performanceScore = scoreRow ? Number(scoreRow.performance_score) : 0;
+
   return NextResponse.json({
     videoCount: videoCount.count,
     totalViews: totalViews.total,
@@ -62,6 +74,9 @@ export async function GET(request: NextRequest) {
     unbilledViews: unbilledViews.total,
     unbilledAmount,
     ratePerView: auth.rate_per_view,
+    reliabilityScore,
+    trustScore,
+    performanceScore,
     onboarding: {
       profileComplete,
       hasAccounts,

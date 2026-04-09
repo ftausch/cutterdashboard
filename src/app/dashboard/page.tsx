@@ -7,7 +7,7 @@ import { CutterNav } from "@/components/cutter-nav";
 import {
   Eye, Video, Euro, TrendingUp, Clock, Plus, Receipt,
   CheckCircle, Circle, User, Link2, Upload, ArrowRight,
-  Sparkles, ChevronRight,
+  Sparkles, ChevronRight, ShieldCheck,
 } from "lucide-react";
 
 interface Onboarding {
@@ -24,6 +24,9 @@ interface Stats {
   unbilledViews: number;
   unbilledAmount: number;
   ratePerView: number;
+  reliabilityScore?: number;
+  trustScore?: number;
+  performanceScore?: number;
   onboarding: Onboarding;
   name?: string;
 }
@@ -199,6 +202,69 @@ function OnboardingCard({ onboarding }: { onboarding: Onboarding }) {
   );
 }
 
+// ── Reliability Widget ────────────────────────────────────────
+type ScoreLabel = 'excellent' | 'strong' | 'average' | 'risky' | 'critical';
+const SCORE_LABEL_META: Record<ScoreLabel, { de: string; color: string; bg: string; border: string; barColor: string }> = {
+  excellent: { de: "Ausgezeichnet", color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30", barColor: "bg-emerald-500" },
+  strong:    { de: "Stark",         color: "text-green-400",   bg: "bg-green-500/10",   border: "border-green-500/30",   barColor: "bg-green-500"   },
+  average:   { de: "Durchschnitt",  color: "text-yellow-400",  bg: "bg-yellow-500/10",  border: "border-yellow-500/30",  barColor: "bg-yellow-500"  },
+  risky:     { de: "Riskant",       color: "text-orange-400",  bg: "bg-orange-500/10",  border: "border-orange-500/30",  barColor: "bg-orange-500"  },
+  critical:  { de: "Kritisch",      color: "text-red-400",     bg: "bg-red-500/10",     border: "border-red-500/30",     barColor: "bg-red-500"     },
+};
+function getScoreLabel(score: number): ScoreLabel {
+  if (score >= 85) return 'excellent';
+  if (score >= 70) return 'strong';
+  if (score >= 50) return 'average';
+  if (score >= 30) return 'risky';
+  return 'critical';
+}
+function ReliabilityWidget({ score, trustScore, performanceScore }: {
+  score: number; trustScore: number; performanceScore: number;
+}) {
+  const label = getScoreLabel(score);
+  const meta = SCORE_LABEL_META[label];
+  return (
+    <div className={`rounded-xl border ${meta.border} ${meta.bg} p-4`}>
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Icon + label */}
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${meta.bg} border ${meta.border}`}>
+          <ShieldCheck className={`h-5 w-5 ${meta.color}`} />
+        </div>
+        {/* Score */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-2xl font-black tabular-nums ${meta.color}`}>{score}</span>
+            <span className="text-muted-foreground text-sm">/100</span>
+            <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${meta.bg} ${meta.color} border ${meta.border}`}>
+              {meta.de}
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-3">
+            <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted/50">
+              <div className={`h-full rounded-full ${meta.barColor}`} style={{ width: `${score}%` }} />
+            </div>
+          </div>
+        </div>
+        {/* Sub-scores */}
+        <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+          <div className="text-center">
+            <p className="font-semibold text-foreground text-sm">{trustScore}</p>
+            <p>Trust</p>
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-foreground text-sm">{performanceScore}</p>
+            <p>Performance</p>
+          </div>
+        </div>
+      </div>
+      <p className="mt-2.5 text-xs text-muted-foreground">
+        Dein <span className="font-medium text-foreground">Zuverlässigkeits-Score</span> basiert auf Angaben-Genauigkeit, Belegen und Performance.
+        Er wird täglich aktualisiert. <span className="text-muted-foreground/60">Trust = 70%, Performance = 30%.</span>
+      </p>
+    </div>
+  );
+}
+
 // ── Stat Card ─────────────────────────────────────────────────
 function StatCard({
   icon, label, value, sub, highlight, href,
@@ -370,6 +436,13 @@ export default function CutterDashboard() {
               highlight
               href="/invoices"
             />
+          </div>
+        )}
+
+        {/* Reliability Score Widget */}
+        {stats && stats.reliabilityScore != null && (
+          <div className="mb-7">
+            <ReliabilityWidget score={stats.reliabilityScore} trustScore={stats.trustScore ?? 0} performanceScore={stats.performanceScore ?? 0} />
           </div>
         )}
 

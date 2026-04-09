@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Film,
   ChevronDown,
+  BarChart2,
 } from "lucide-react";
 
 interface CutterSession {
@@ -28,6 +29,7 @@ interface CutterSession {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/videos", label: "Videos", icon: Video },
+  { href: "/performance", label: "Performance", icon: BarChart2 },
   { href: "/episodes", label: "Episoden", icon: Film },
   { href: "/invoices", label: "Rechnungen", icon: Receipt },
   { href: "/accounts", label: "Konten", icon: Link2 },

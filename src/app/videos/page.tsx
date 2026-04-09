@@ -26,7 +26,57 @@ interface VideoRow {
   created_at: string;
   proof_url: string | null;
   proof_status: string | null;
+  proof_submitted_at?: string | null;
   episode_id: string | null;
+  is_flagged?: boolean;
+}
+
+type ClipStatus =
+  | "submitted"
+  | "syncing"
+  | "verified"
+  | "partially_verified"
+  | "manual_proof_required"
+  | "under_review"
+  | "rejected";
+
+function getClipStatus(v: VideoRow): ClipStatus {
+  if (v.is_flagged) return "rejected";
+  if (v.proof_status === "submitted") return "under_review";
+  if (
+    v.discrepancy_status === "critical_difference" ||
+    v.discrepancy_status === "suspicious_difference"
+  ) {
+    if (!v.proof_url) return "manual_proof_required";
+  }
+  if (v.verification_status === "verified") return "verified";
+  if (v.verification_status === "partially_verified") return "partially_verified";
+  if (!v.last_scraped_at) return "submitted";
+  return "syncing";
+}
+
+const STATUS_CONFIG: Record<ClipStatus, { label: string; className: string }> = {
+  submitted:             { label: "Eingereicht",  className: "bg-muted/50 text-muted-foreground border border-border" },
+  syncing:               { label: "⟳ Syncing",    className: "bg-blue-500/10 text-blue-400 border border-blue-500/20" },
+  verified:              { label: "✓ Verifiziert", className: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" },
+  partially_verified:    { label: "~ Teilweise",   className: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" },
+  manual_proof_required: { label: "⚠ Beleg nötig", className: "bg-orange-500/10 text-orange-400 border border-orange-500/20" },
+  under_review:          { label: "In Prüfung",    className: "bg-purple-500/10 text-purple-400 border border-purple-500/20" },
+  rejected:              { label: "✕ Abgelehnt",   className: "bg-red-500/10 text-red-400 border border-red-500/20" },
+};
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (mins < 2) return "gerade eben";
+  if (mins < 60) return `vor ${mins}m`;
+  if (hours < 24) return `vor ${hours}h`;
+  if (days === 1) return "gestern";
+  if (days < 7) return `vor ${days}T`;
+  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -71,15 +121,15 @@ function TableSkeleton() {
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <div className="border-b border-border px-4 py-3">
-        <div className="grid grid-cols-6 gap-4">
-          {["Video", "Plattform", "Views", "Gemeldet", "Status", "Nachweis"].map((h) => (
+        <div className="grid grid-cols-8 gap-4">
+          {["Video", "Plattform", "Views", "Gemeldet", "Clip-Status", "Zuletzt sync", "Nachweis", ""].map((h) => (
             <div key={h} className="skeleton h-3 w-16" />
           ))}
         </div>
       </div>
       {[...Array(6)].map((_, i) => (
         <div key={i} className="border-b border-border px-4 py-4 last:border-0">
-          <div className="grid grid-cols-6 gap-4 items-center">
+          <div className="grid grid-cols-8 gap-4 items-center">
             <div>
               <div className="skeleton h-4 w-40 mb-1.5" />
               <div className="skeleton h-3 w-28" />
@@ -88,7 +138,9 @@ function TableSkeleton() {
             <div className="skeleton h-4 w-12" />
             <div className="skeleton h-4 w-12" />
             <div className="skeleton h-5 w-20 rounded-md" />
+            <div className="skeleton h-4 w-14" />
             <div className="skeleton h-6 w-16 rounded-md" />
+            <div className="skeleton h-5 w-5 rounded" />
           </div>
         </div>
       ))}
@@ -337,7 +389,8 @@ export default function CutterVideosPage() {
                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-right">
                       <span title="Deine gemeldeten Views — klicken zum Bearbeiten">Views ~</span>
                     </th>
-                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Clip-Status</th>
+                    <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Zuletzt sync</th>
                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground text-right">Neu</th>
                     <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Nachweis</th>
                     <th className="w-10 px-4 py-3"></th>
@@ -370,10 +423,18 @@ export default function CutterVideosPage() {
                         <ClaimedViewsCell video={v} onUpdate={handleClaimedUpdate} />
                       </td>
                       <td className="px-4 py-3.5">
-                        <div className="flex flex-col gap-1">
-                          <VerificationBadge status={v.verification_status} />
-                          <DiscrepancyBadge status={v.discrepancy_status} percent={v.discrepancy_percent} />
-                        </div>
+                        {(() => {
+                          const s = getClipStatus(v);
+                          const cfg = STATUS_CONFIG[s];
+                          return (
+                            <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${cfg.className}`}>
+                              {cfg.label}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                        {formatRelativeTime(v.last_scraped_at)}
                       </td>
                       <td className="px-4 py-3.5 text-right">
                         {v.unbilled_views > 0 ? (
@@ -409,7 +470,8 @@ export default function CutterVideosPage() {
           <p className="mt-3 text-xs text-muted-foreground">
             <strong>Views ✓</strong> = verifiziert durch Scraping &nbsp;·&nbsp;
             <strong>Views ~</strong> = deine Angabe (klicken zum Bearbeiten) &nbsp;·&nbsp;
-            <strong>Neu</strong> = noch nicht abgerechnete Views
+            <strong>Neu</strong> = noch nicht abgerechnete Views &nbsp;·&nbsp;
+            <strong>Clip-Status</strong> = aktueller Prüf-Status
           </p>
         )}
       </main>

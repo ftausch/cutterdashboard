@@ -15,7 +15,12 @@ interface PendingProof {
   proof_status: string;
   claimed_views: number | null;
   current_views: number;
+  observed_views: number | null;
+  api_views: number | null;
+  verification_source: string | null;
+  confidence_level: number | null;
   discrepancy_status: string | null;
+  discrepancy_percent: number | null;
   cutter_name: string;
   cutter_id: string;
 }
@@ -136,23 +141,48 @@ export default function OpsVerificationPage() {
                   </div>
                 </div>
 
-                {/* View stats */}
-                <div className="flex items-center gap-6 text-sm">
+                {/* View stats — show all 3 tiers */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-lg border border-border bg-muted/20 p-3 text-sm">
                   <div>
-                    <span className="text-muted-foreground">Verifizierte Views: </span>
-                    <span className="font-medium">{formatNum(proof.current_views)}</span>
+                    <p className="text-xs text-muted-foreground mb-0.5">Angegeben (Klipper)</p>
+                    <p className="font-semibold">{formatNum(proof.claimed_views)}</p>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Gemeldete Views: </span>
-                    <span className="font-medium">{formatNum(proof.claimed_views)}</span>
+                    <p className="text-xs text-muted-foreground mb-0.5">Beobachtet (Scraper)</p>
+                    <p className="font-semibold">{formatNum(proof.observed_views ?? proof.current_views)}</p>
                   </div>
-                  {proof.discrepancy_status && (
-                    <div>
-                      <span className="text-muted-foreground">Abweichung: </span>
-                      <span className="font-medium">{proof.discrepancy_status}</span>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Offizielle API</p>
+                    <p className="font-semibold">{formatNum(proof.api_views)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Konfidenz</p>
+                    <div className="flex items-center gap-1.5">
+                      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${proof.confidence_level ?? 0}%` }}
+                        />
+                      </div>
+                      <span className="font-semibold text-xs">{proof.confidence_level ?? 0}%</span>
                     </div>
-                  )}
+                  </div>
                 </div>
+                {/* Discrepancy badge */}
+                {proof.discrepancy_status && proof.discrepancy_status !== 'cannot_verify' && (
+                  <div className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium ${
+                    proof.discrepancy_status === 'match' ? 'bg-emerald-500/10 text-emerald-400' :
+                    proof.discrepancy_status === 'minor_difference' ? 'bg-yellow-500/10 text-yellow-400' :
+                    proof.discrepancy_status === 'suspicious_difference' ? 'bg-orange-500/10 text-orange-400' :
+                    'bg-red-500/10 text-red-400'
+                  }`}>
+                    {proof.discrepancy_status === 'match' && '✓ Übereinstimmung'}
+                    {proof.discrepancy_status === 'minor_difference' && `~ Kleine Abweichung (${proof.discrepancy_percent}%)`}
+                    {proof.discrepancy_status === 'suspicious_difference' && `⚠ Verdächtig (${proof.discrepancy_percent}%)`}
+                    {proof.discrepancy_status === 'critical_difference' && `✕ Kritisch (${proof.discrepancy_percent}%)`}
+                    {' '}· Quelle: {proof.verification_source ?? '—'}
+                  </div>
+                )}
 
                 {/* Proof image */}
                 <div className="rounded-lg border border-border overflow-hidden">

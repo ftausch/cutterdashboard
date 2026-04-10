@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/reminders",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/generate-alerts",
+      "schedule": "0 6 * * *"
     }
   ]
 }

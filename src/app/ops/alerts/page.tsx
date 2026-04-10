@@ -1,142 +1,186 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
-  RefreshCw,
-  Bell,
   AlertTriangle,
-  Clock,
-  ImageIcon,
-  HelpCircle,
+  Bell,
+  CheckCircle2,
   ChevronDown,
-  Flag,
+  ChevronUp,
   ExternalLink,
+  Eye,
+  Filter,
+  RefreshCw,
+  Search,
+  Shield,
+  Sparkles,
+  UserCheck,
+  X,
+  Zap,
 } from "lucide-react";
 
-interface DiscrepancyAlert {
-  id: string | null;
+// ── Types ──────────────────────────────────────────────────────
+
+type Severity = "critical" | "high" | "medium" | "low";
+type AlertStatus = "open" | "acknowledged" | "in_review" | "resolved" | "dismissed";
+type AlertType =
+  | "discrepancy_critical"
+  | "discrepancy_suspicious"
+  | "proof_submitted"
+  | "proof_overdue"
+  | "sync_stale"
+  | "no_verification";
+
+interface AlertVideo {
+  title: string | null;
   platform: string | null;
   url: string | null;
-  title: string | null;
-  claimed_views: number | null;
-  current_views: number | null;
-  discrepancy_status: string | null;
-  discrepancy_percent: number | null;
-  created_at: string | null;
-  cutter_name: string | null;
+  claimedViews: number | null;
+  currentViews: number | null;
+  discrepancyPercent: number | null;
+  proofStatus: string | null;
+  lastScrapedAt: string | null;
 }
 
-interface NotSyncedAlert {
-  id: string | null;
-  platform: string | null;
-  url: string | null;
-  title: string | null;
-  current_views: number | null;
-  last_scraped_at: string | null;
-  cutter_name: string | null;
+interface AlertItem {
+  id: string;
+  type: AlertType;
+  severity: Severity;
+  status: AlertStatus;
+  title: string;
+  detail: string | null;
+  meta: Record<string, unknown>;
+  videoId: string;
+  cutterId: string;
+  cutterName: string;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  triggeredAt: string;
+  updatedAt: string;
+  video: AlertVideo;
 }
 
-interface PendingProofAlert {
-  id: string | null;
-  platform: string | null;
-  url: string | null;
-  title: string | null;
-  claimed_views: number | null;
-  current_views: number | null;
-  proof_status: string | null;
-  proof_uploaded_at: string | null;
-  cutter_name: string | null;
+interface QueueResponse {
+  alerts: AlertItem[];
+  statusCounts: Record<string, number>;
+  openBySeverity: Record<string, number>;
+  totalActive: number;
+  totalMatching: number;
+  hasMore: boolean;
 }
 
-interface UnverifiedAlert {
-  id: string | null;
-  platform: string | null;
-  url: string | null;
-  title: string | null;
-  claimed_views: number | null;
-  cutter_name: string | null;
-  created_at: string | null;
-}
+// ── Static config ──────────────────────────────────────────────
 
-interface AlertCounts {
-  discrepancies: number;
-  notSynced: number;
-  pendingProof: number;
-  unverified: number;
-  total: number;
-}
+const SEVERITY_CONFIG: Record<Severity, {
+  label: string; colorClass: string; dotClass: string;
+  stripClass: string; badgeClass: string;
+}> = {
+  critical: {
+    label: "Kritisch",
+    colorClass: "text-red-400",
+    dotClass: "bg-red-500",
+    stripClass: "bg-red-500",
+    badgeClass: "bg-red-500/10 text-red-400 border-red-500/20",
+  },
+  high: {
+    label: "Hoch",
+    colorClass: "text-orange-400",
+    dotClass: "bg-orange-500",
+    stripClass: "bg-orange-500",
+    badgeClass: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  },
+  medium: {
+    label: "Mittel",
+    colorClass: "text-yellow-400",
+    dotClass: "bg-yellow-500",
+    stripClass: "bg-yellow-500",
+    badgeClass: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+  },
+  low: {
+    label: "Niedrig",
+    colorClass: "text-blue-400",
+    dotClass: "bg-blue-400",
+    stripClass: "bg-blue-400",
+    badgeClass: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  },
+};
 
-interface AlertsResponse {
-  discrepancies: DiscrepancyAlert[];
-  notSynced: NotSyncedAlert[];
-  pendingProof: PendingProofAlert[];
-  unverified: UnverifiedAlert[];
-  counts: AlertCounts;
-}
+const STATUS_CONFIG: Record<AlertStatus, { label: string; badgeClass: string }> = {
+  open:         { label: "Offen",      badgeClass: "bg-muted text-muted-foreground" },
+  acknowledged: { label: "Bestätigt",  badgeClass: "bg-blue-500/10 text-blue-400" },
+  in_review:    { label: "In Prüfung", badgeClass: "bg-primary/15 text-primary" },
+  resolved:     { label: "Gelöst",     badgeClass: "bg-emerald-500/10 text-emerald-400" },
+  dismissed:    { label: "Ignoriert",  badgeClass: "bg-muted/50 text-muted-foreground/50" },
+};
+
+const TYPE_LABELS: Record<AlertType, string> = {
+  discrepancy_critical:   "Krit. Diskrepanz",
+  discrepancy_suspicious: "Verd. Diskrepanz",
+  proof_submitted:        "Beleg ausstehend",
+  proof_overdue:          "Beleg überfällig",
+  sync_stale:             "Sync veraltet",
+  no_verification:        "Keine Verifikation",
+};
 
 const PLATFORM_LABELS: Record<string, string> = {
-  youtube: "YouTube",
-  tiktok: "TikTok",
-  instagram: "Instagram",
-  facebook: "Facebook",
+  youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", facebook: "Facebook",
 };
+
+const ALL_SEVERITIES: Severity[]    = ["critical", "high", "medium", "low"];
+const ALL_TYPES: AlertType[]        = ["discrepancy_critical", "discrepancy_suspicious", "proof_submitted", "proof_overdue", "sync_stale", "no_verification"];
+const ACTIVE_STATUSES: AlertStatus[] = ["open", "acknowledged", "in_review"];
+const ALL_STATUSES: AlertStatus[]   = ["open", "acknowledged", "in_review", "resolved", "dismissed"];
+
+// ── Helpers ────────────────────────────────────────────────────
 
 function formatNum(n: number | null | undefined): string {
   if (n == null) return "—";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
   return new Intl.NumberFormat("de-DE").format(n);
 }
 
-function formatRelative(dateStr: string | null): string {
-  if (!dateStr) return "Nie";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `vor ${mins}min`;
+function formatRelative(iso: string | null): string {
+  if (!iso) return "nie";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 2)  return "gerade eben";
+  if (mins < 60) return `vor ${mins}m`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `vor ${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days === 1) return "gestern";
-  return `vor ${days} Tagen`;
+  return days === 1 ? "gestern" : `vor ${days}d`;
 }
 
-function isUrgent(dateStr: string | null): boolean {
-  if (!dateStr) return false;
-  const diff = Date.now() - new Date(dateStr).getTime();
-  return diff > 48 * 60 * 60 * 1000;
-}
+// ── Filter Pill ────────────────────────────────────────────────
 
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-  count,
-  countCls,
+function FilterPill({
+  active, onClick, label, count, dotClass,
 }: {
   active: boolean;
   onClick: () => void;
-  icon: React.ReactNode;
   label: string;
-  count: number;
-  countCls: string;
+  count?: number;
+  dotClass?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 whitespace-nowrap ${
+      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap ${
         active
-          ? "bg-primary/15 text-primary"
-          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
       }`}
     >
-      {icon}
-      <span className="hidden sm:block">{label}</span>
-      {count > 0 && (
-        <span className={`rounded-full px-1.5 py-0.5 text-xs font-bold leading-none ${countCls}`}>
+      {dotClass && <span className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`} />}
+      {label}
+      {count != null && count > 0 && (
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+          active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
+        }`}>
           {count}
         </span>
       )}
@@ -144,463 +188,493 @@ function TabButton({
   );
 }
 
-function SectionHeader({
-  title,
-  open,
-  onToggle,
+// ── Alert Card ─────────────────────────────────────────────────
+
+function AlertCard({
+  alert, onAction, currentUserName,
 }: {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
+  alert: AlertItem;
+  onAction: (id: string, action: string) => Promise<void>;
+  currentUserName: string | null;
 }) {
+  const [acting, setActing]   = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const sev = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.medium;
+  const sta = STATUS_CONFIG[alert.status]     ?? STATUS_CONFIG.open;
+  const isActive = !["resolved", "dismissed"].includes(alert.status);
+  const discPct  = alert.video.discrepancyPercent ?? (alert.meta.discrepancy_percent as number | null);
+
+  async function act(action: string) {
+    setActing(action);
+    await onAction(alert.id, action);
+    setActing(null);
+  }
+
+  const Spinner = () => <RefreshCw className="h-3.5 w-3.5 animate-spin" />;
+
   return (
-    <button
-      onClick={onToggle}
-      className="flex w-full items-center justify-between px-5 py-3 hover:bg-muted/20 transition-colors"
-    >
-      <span className="font-semibold text-sm">{title}</span>
-      <ChevronDown
-        className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-      />
-    </button>
+    <div className={`relative flex rounded-xl border border-border bg-card overflow-hidden transition-opacity ${
+      !isActive ? "opacity-55" : ""
+    }`}>
+      {/* Severity left strip */}
+      <div className={`w-1 shrink-0 ${sev.stripClass}`} />
+
+      <div className="flex-1 min-w-0 p-4 space-y-3">
+        {/* ── Row 1: severity + type + platform + status + time ── */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <span className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${sev.colorClass}`}>
+              <span className={`h-2 w-2 rounded-full ${sev.dotClass}`} />
+              {sev.label}
+            </span>
+            <span className={`rounded border px-1.5 py-0.5 text-xs font-medium ${sev.badgeClass}`}>
+              {TYPE_LABELS[alert.type] ?? alert.type}
+            </span>
+            {alert.video.platform && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                {PLATFORM_LABELS[alert.video.platform] ?? alert.video.platform}
+              </span>
+            )}
+            <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${sta.badgeClass}`}>
+              {sta.label}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
+            {alert.assigneeName && (
+              <span className="flex items-center gap-1">
+                <UserCheck className="h-3 w-3" />
+                {alert.assigneeName}
+              </span>
+            )}
+            <span className="text-muted-foreground/50">{formatRelative(alert.triggeredAt)}</span>
+          </div>
+        </div>
+
+        {/* ── Row 2: title + clip info ── */}
+        <div>
+          <p className="text-sm font-semibold leading-snug mb-1">{alert.title}</p>
+          <div className="flex items-center gap-1.5 flex-wrap text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/75">
+              {alert.video.title
+                ? (alert.video.title.length > 60 ? alert.video.title.slice(0, 60) + "…" : alert.video.title)
+                : "Unbekannter Clip"}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>{alert.cutterName}</span>
+            {alert.video.url && (
+              <a href={alert.video.url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center hover:text-primary transition-colors">
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* ── Row 3: type-specific context data ── */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {(alert.type === "discrepancy_critical" || alert.type === "discrepancy_suspicious") && discPct != null && (
+            <>
+              <span className={`text-sm font-bold font-mono ${
+                alert.severity === "critical" ? "text-red-400" : "text-orange-400"
+              }`}>
+                {discPct > 0 ? "+" : ""}{discPct.toFixed(1)}%
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Angabe {formatNum(alert.video.claimedViews)} · Verifiziert {formatNum(alert.video.currentViews)}
+              </span>
+            </>
+          )}
+          {alert.type === "proof_submitted" && (
+            <span className="text-xs text-muted-foreground">Beleg hochgeladen — wartet auf Genehmigung</span>
+          )}
+          {alert.type === "proof_overdue" && (
+            <span className={`text-xs font-medium ${(alert.meta.hours_overdue as number) > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
+              {(alert.meta.hours_overdue as number) > 0
+                ? `${alert.meta.hours_overdue}h ohne Einreichung`
+                : "Beleg angefordert — keine Einreichung"}
+            </span>
+          )}
+          {alert.type === "sync_stale" && (
+            <span className="text-xs text-yellow-400">
+              Letzter Sync: {formatRelative(alert.video.lastScrapedAt)}
+            </span>
+          )}
+          {alert.type === "no_verification" && (
+            <span className="text-xs text-muted-foreground">Keine API-Verifikation möglich</span>
+          )}
+        </div>
+
+        {/* ── Expandable detail ── */}
+        {alert.detail && (
+          <div>
+            <button
+              onClick={() => setExpanded(p => !p)}
+              className="flex items-center gap-1 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            >
+              {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              {expanded ? "Weniger" : "Details"}
+            </button>
+            {expanded && (
+              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed pl-3 border-l-2 border-border">
+                {alert.detail}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Action row ── */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+          <Link
+            href={`/ops/clips/${alert.videoId}`}
+            className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Clip öffnen
+          </Link>
+
+          {isActive && (
+            <>
+              {alert.status === "open" && (
+                <button onClick={() => act("acknowledge")} disabled={acting !== null}
+                  className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors">
+                  {acting === "acknowledge" ? <Spinner /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  Bestätigen
+                </button>
+              )}
+
+              {["open", "acknowledged"].includes(alert.status) && (
+                <button onClick={() => act("start_review")} disabled={acting !== null}
+                  className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50 transition-colors">
+                  {acting === "start_review" ? <Spinner /> : <Search className="h-3.5 w-3.5" />}
+                  In Prüfung
+                </button>
+              )}
+
+              {!alert.assigneeName && (
+                <button onClick={() => act("assign_self")} disabled={acting !== null}
+                  title={currentUserName ? `Mir zuweisen (${currentUserName})` : "Mir zuweisen"}
+                  className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors">
+                  {acting === "assign_self" ? <Spinner /> : <UserCheck className="h-3.5 w-3.5" />}
+                  Mir
+                </button>
+              )}
+
+              <button onClick={() => act("resolve")} disabled={acting !== null}
+                className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50 transition-colors">
+                {acting === "resolve" ? <Spinner /> : <Shield className="h-3.5 w-3.5" />}
+                Lösen
+              </button>
+
+              <button onClick={() => act("dismiss")} disabled={acting !== null}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground disabled:opacity-50 transition-colors">
+                {acting === "dismiss" ? <Spinner /> : <X className="h-3.5 w-3.5" />}
+                Ignorieren
+              </button>
+            </>
+          )}
+
+          {!isActive && (
+            <button onClick={() => act("reopen")} disabled={acting !== null}
+              className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors">
+              {acting === "reopen" ? <Spinner /> : <Zap className="h-3.5 w-3.5" />}
+              Wieder öffnen
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
-type Tab = "discrepancies" | "notSynced" | "pendingProof" | "unverified";
+// ── Page ───────────────────────────────────────────────────────
 
 export default function AlertQueuePage() {
   const router = useRouter();
-  const [data, setData] = useState<AlertsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>("discrepancies");
-  const [openSections, setOpenSections] = useState<Record<Tab, boolean>>({
-    discrepancies: true,
-    notSynced: true,
-    pendingProof: true,
-    unverified: true,
-  });
+
+  const [alerts, setAlerts]                 = useState<AlertItem[]>([]);
+  const [statusCounts, setStatusCounts]     = useState<Record<string, number>>({});
+  const [openBySeverity, setOpenBySeverity] = useState<Record<string, number>>({});
+  const [totalActive, setTotalActive]       = useState(0);
+  const [loading, setLoading]               = useState(true);
+  const [generating, setGenerating]         = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string | null>(null);
+
+  const [statusFilter,   setStatusFilter]   = useState<AlertStatus[]>(ACTIVE_STATUSES);
+  const [severityFilter, setSeverityFilter] = useState<Severity[]>([]);
+  const [typeFilter,     setTypeFilter]     = useState<AlertType[]>([]);
+  const [showTypeFilter, setShowTypeFilter] = useState(false);
+
+  // Fetch session for "assign to me" label
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && !d.error) setCurrentUserName(d.name); })
+      .catch(() => {});
+  }, []);
+
+  const buildParams = useCallback(() => {
+    const p = new URLSearchParams();
+    p.set("status", statusFilter.join(",") || "open");
+    if (severityFilter.length) p.set("severity", severityFilter.join(","));
+    if (typeFilter.length)     p.set("type",     typeFilter.join(","));
+    p.set("limit", "100");
+    return p.toString();
+  }, [statusFilter, severityFilter, typeFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/ops/alerts");
-    if (res.status === 401) { router.push("/login"); return; }
-    if (res.status === 403) { router.push("/dashboard"); return; }
-    const json = await res.json();
-    setData(json);
-    setLoading(false);
-  }, [router]);
+    try {
+      const res = await fetch(`/api/ops/alerts?${buildParams()}`);
+      if (res.status === 401) { router.push("/login"); return; }
+      if (res.status === 403) { router.push("/dashboard"); return; }
+      const data: QueueResponse = await res.json();
+      setAlerts(data.alerts ?? []);
+      setStatusCounts(data.statusCounts ?? {});
+      setOpenBySeverity(data.openBySeverity ?? {});
+      setTotalActive(data.totalActive ?? 0);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [router, buildParams]);
 
   useEffect(() => { load(); }, [load]);
 
-  function toggleSection(tab: Tab) {
-    setOpenSections(prev => ({ ...prev, [tab]: !prev[tab] }));
+  async function doAction(alertId: string, action: string) {
+    const isTerminal = ["resolve", "dismiss"].includes(action);
+    const notShowingTerminal =
+      !statusFilter.includes("resolved") && !statusFilter.includes("dismissed");
+
+    // Optimistic update
+    if (isTerminal && notShowingTerminal) {
+      setAlerts(prev => prev.filter(a => a.id !== alertId));
+    } else {
+      const statusMap: Record<string, AlertStatus> = {
+        acknowledge: "acknowledged",
+        start_review: "in_review",
+        resolve: "resolved",
+        dismiss: "dismissed",
+        reopen: "open",
+      };
+      if (statusMap[action]) {
+        setAlerts(prev => prev.map(a =>
+          a.id === alertId ? { ...a, status: statusMap[action] } : a
+        ));
+      }
+      if (action === "assign_self" && currentUserName) {
+        setAlerts(prev => prev.map(a =>
+          a.id === alertId ? { ...a, assigneeName: currentUserName } : a
+        ));
+      }
+    }
+
+    await fetch(`/api/ops/alerts/${alertId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+
+    // Refresh counts (don't show full spinner on count refresh)
+    const res = await fetch(`/api/ops/alerts?${buildParams()}`);
+    if (res.ok) {
+      const data: QueueResponse = await res.json();
+      setStatusCounts(data.statusCounts ?? {});
+      setOpenBySeverity(data.openBySeverity ?? {});
+      setTotalActive(data.totalActive ?? 0);
+    }
   }
 
-  const counts = data?.counts ?? { discrepancies: 0, notSynced: 0, pendingProof: 0, unverified: 0, total: 0 };
+  async function generateAlerts() {
+    setGenerating(true);
+    try {
+      await fetch("/api/cron/generate-alerts", { method: "POST" });
+      await load();
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const toggleStatus   = (s: AlertStatus) => setStatusFilter(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
+  const toggleSeverity = (s: Severity)    => setSeverityFilter(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
+  const toggleType     = (t: AlertType)   => setTypeFilter(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
+
+  const activeCount   = (statusCounts.open ?? 0) + (statusCounts.acknowledged ?? 0) + (statusCounts.in_review ?? 0);
+  const criticalCount = openBySeverity.critical ?? 0;
 
   return (
     <>
       <CutterNav />
-      <main className="mx-auto max-w-5xl p-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">Alert Queue</h1>
-            {data && counts.total > 0 && (
-              <span className="flex h-6 items-center rounded-full bg-red-500/15 px-2.5 text-xs font-bold text-red-400">
-                {counts.total}
-              </span>
+      <main className="mx-auto max-w-4xl p-6 space-y-5">
+
+        {/* ── Header ── */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <AlertTriangle className="h-6 w-6" />
+                Alert Queue
+              </h1>
+              {activeCount > 0 && (
+                <span className={`flex h-6 items-center rounded-full px-2.5 text-xs font-bold ${
+                  criticalCount > 0 ? "bg-red-500/15 text-red-400" : "bg-orange-500/15 text-orange-400"
+                }`}>
+                  {activeCount} aktiv
+                </span>
+              )}
+            </div>
+            {criticalCount > 0 && (
+              <p className="text-sm text-red-400/80 mt-0.5 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                {criticalCount} kritische{criticalCount !== 1 ? "" : "r"} Alert{criticalCount !== 1 ? "s" : ""}{" "}
+                erfordern sofortige Aufmerksamkeit
+              </p>
             )}
           </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generateAlerts}
+              disabled={generating || loading}
+              title="Alle Videos prüfen und Alerts aktualisieren"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 transition-colors"
+            >
+              {generating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Alerts generieren
+            </button>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Severity overview ── */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <FilterPill
+            active={severityFilter.length === 0}
+            onClick={() => setSeverityFilter([])}
+            label="Alle Schweregrade"
+            count={activeCount}
+          />
+          {ALL_SEVERITIES.map(sev => (
+            <FilterPill
+              key={sev}
+              active={severityFilter.includes(sev)}
+              onClick={() => toggleSeverity(sev)}
+              label={SEVERITY_CONFIG[sev].label}
+              count={openBySeverity[sev] ?? 0}
+              dotClass={SEVERITY_CONFIG[sev].dotClass}
+            />
+          ))}
+        </div>
+
+        {/* ── Status filter + type toggle ── */}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {ALL_STATUSES.map(s => (
+              <FilterPill
+                key={s}
+                active={statusFilter.includes(s)}
+                onClick={() => toggleStatus(s)}
+                label={STATUS_CONFIG[s].label}
+                count={statusCounts[s] ?? 0}
+              />
+            ))}
+          </div>
           <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+            onClick={() => setShowTypeFilter(p => !p)}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-all ${
+              showTypeFilter || typeFilter.length > 0
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-accent"
+            }`}
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Aktualisieren
+            <Filter className="h-3.5 w-3.5" />
+            Typen
+            {typeFilter.length > 0 && (
+              <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-primary leading-none">
+                {typeFilter.length}
+              </span>
+            )}
           </button>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none border-b border-border pb-2">
-          <TabButton
-            active={activeTab === "discrepancies"}
-            onClick={() => setActiveTab("discrepancies")}
-            icon={<AlertTriangle className="h-4 w-4" />}
-            label="Abweichungen"
-            count={counts.discrepancies}
-            countCls="bg-red-500/15 text-red-400"
-          />
-          <TabButton
-            active={activeTab === "notSynced"}
-            onClick={() => setActiveTab("notSynced")}
-            icon={<Clock className="h-4 w-4" />}
-            label="Kein Sync"
-            count={counts.notSynced}
-            countCls="bg-yellow-500/15 text-yellow-400"
-          />
-          <TabButton
-            active={activeTab === "pendingProof"}
-            onClick={() => setActiveTab("pendingProof")}
-            icon={<ImageIcon className="h-4 w-4" />}
-            label="Beleg ausstehend"
-            count={counts.pendingProof}
-            countCls="bg-blue-500/15 text-blue-400"
-          />
-          <TabButton
-            active={activeTab === "unverified"}
-            onClick={() => setActiveTab("unverified")}
-            icon={<HelpCircle className="h-4 w-4" />}
-            label="Nicht verifiziert"
-            count={counts.unverified}
-            countCls="bg-orange-500/15 text-orange-400"
-          />
-        </div>
-
-        {loading ? (
-          <div className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground">
-            <RefreshCw className="h-6 w-6 mx-auto mb-3 animate-spin opacity-50" />
-            <p className="text-sm">Lade Alerts…</p>
+        {/* ── Type filter ── */}
+        {showTypeFilter && (
+          <div className="flex items-center gap-1.5 flex-wrap rounded-xl border border-border bg-muted/20 p-3">
+            <span className="text-xs text-muted-foreground mr-1">Typ:</span>
+            {ALL_TYPES.map(t => (
+              <FilterPill
+                key={t}
+                active={typeFilter.includes(t)}
+                onClick={() => toggleType(t)}
+                label={TYPE_LABELS[t]}
+              />
+            ))}
+            {typeFilter.length > 0 && (
+              <button onClick={() => setTypeFilter([])} className="text-xs text-muted-foreground/60 hover:text-muted-foreground ml-1">
+                Zurücksetzen
+              </button>
+            )}
           </div>
-        ) : !data ? null : (
-          <>
-            {/* Discrepancies */}
-            {activeTab === "discrepancies" && (
-              <div className="rounded-xl border border-red-500/20 bg-card overflow-hidden">
-                <SectionHeader
-                  title={`Abweichungen (${counts.discrepancies})`}
-                  open={openSections.discrepancies}
-                  onToggle={() => toggleSection("discrepancies")}
-                />
-                {openSections.discrepancies && (
-                  data.discrepancies.length === 0 ? (
-                    <div className="px-5 py-10 text-center text-muted-foreground text-sm">
-                      <AlertTriangle className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                      Keine Abweichungen gefunden
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-muted/20">
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Cutter</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Plattform</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground max-w-48">Clip</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Angabe</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Verifiziert</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Disc.%</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Status</th>
-                            <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Aktion</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {data.discrepancies.map((item) => {
-                            const isCritical = item.discrepancy_status === "critical_difference";
-                            return (
-                              <tr
-                                key={item.id}
-                                className={`hover:bg-muted/30 ${isCritical ? "border-l-2 border-red-500" : "border-l-2 border-amber-500"}`}
-                              >
-                                <td className="px-4 py-3 text-xs font-medium">{item.cutter_name ?? "—"}</td>
-                                <td className="px-4 py-3">
-                                  <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                    {PLATFORM_LABELS[item.platform ?? ""] ?? item.platform ?? "—"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 max-w-48">
-                                  {item.url ? (
-                                    <a
-                                      href={item.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center gap-1 text-xs hover:text-primary truncate"
-                                      title={item.title ?? ""}
-                                    >
-                                      <span className="truncate">{item.title ?? item.url}</span>
-                                      <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
-                                    </a>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground truncate">{item.title ?? "—"}</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-right text-xs font-mono">{formatNum(item.claimed_views)}</td>
-                                <td className="px-4 py-3 text-right text-xs font-mono">{formatNum(item.current_views)}</td>
-                                <td className="px-4 py-3 text-right text-xs">
-                                  {item.discrepancy_percent != null ? (
-                                    <span className={isCritical ? "text-red-400 font-bold" : "text-orange-400 font-medium"}>
-                                      {item.discrepancy_percent > 0 ? "+" : ""}{item.discrepancy_percent.toFixed(1)}%
-                                    </span>
-                                  ) : "—"}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                                    isCritical ? "bg-red-500/10 text-red-400" : "bg-orange-500/10 text-orange-400"
-                                  }`}>
-                                    {isCritical ? "Kritisch" : "Verdächtig"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <Link
-                                    href={`/ops/clips/${item.id}`}
-                                    className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
-                                  >
-                                    <Flag className="h-3 w-3" />
-                                    Prüfen
-                                  </Link>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-            {/* Not synced */}
-            {activeTab === "notSynced" && (
-              <div className="rounded-xl border border-yellow-500/20 bg-card overflow-hidden">
-                <SectionHeader
-                  title={`Kein Sync seit 7+ Tagen (${counts.notSynced})`}
-                  open={openSections.notSynced}
-                  onToggle={() => toggleSection("notSynced")}
-                />
-                {openSections.notSynced && (
-                  data.notSynced.length === 0 ? (
-                    <div className="px-5 py-10 text-center text-muted-foreground text-sm">
-                      <Clock className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                      Alle Clips wurden kürzlich synchronisiert
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-muted/20">
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Cutter</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Plattform</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground max-w-48">Clip</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Views</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Letzter Sync</th>
-                            <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Detail</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {data.notSynced.map((item) => (
-                            <tr key={item.id} className="hover:bg-muted/30">
-                              <td className="px-4 py-3 text-xs font-medium">{item.cutter_name ?? "—"}</td>
-                              <td className="px-4 py-3">
-                                <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                  {PLATFORM_LABELS[item.platform ?? ""] ?? item.platform ?? "—"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 max-w-48">
-                                {item.url ? (
-                                  <a
-                                    href={item.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-xs hover:text-primary truncate"
-                                    title={item.title ?? ""}
-                                  >
-                                    <span className="truncate">{item.title ?? item.url}</span>
-                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
-                                  </a>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground truncate">{item.title ?? "—"}</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-right text-xs font-mono">{formatNum(item.current_views)}</td>
-                              <td className="px-4 py-3 text-xs text-yellow-400">
-                                {item.last_scraped_at ? formatRelative(item.last_scraped_at) : "Nie"}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Link
-                                  href={`/ops/clips/${item.id}`}
-                                  className="rounded bg-muted px-2 py-1 text-xs hover:bg-accent transition-colors"
-                                >
-                                  Detail
-                                </Link>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-            {/* Pending proof */}
-            {activeTab === "pendingProof" && (
-              <div className="rounded-xl border border-blue-500/20 bg-card overflow-hidden">
-                <SectionHeader
-                  title={`Beleg ausstehend (${counts.pendingProof})`}
-                  open={openSections.pendingProof}
-                  onToggle={() => toggleSection("pendingProof")}
-                />
-                {openSections.pendingProof && (
-                  data.pendingProof.length === 0 ? (
-                    <div className="px-5 py-10 text-center text-muted-foreground text-sm">
-                      <ImageIcon className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                      Keine ausstehenden Belege
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-muted/20">
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Cutter</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Plattform</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground max-w-48">Clip</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Angabe</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Eingereicht</th>
-                            <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Prüfen</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {data.pendingProof.map((item) => {
-                            const urgent = isUrgent(item.proof_uploaded_at);
-                            return (
-                              <tr key={item.id} className={`hover:bg-muted/30 ${urgent ? "border-l-2 border-blue-500" : ""}`}>
-                                <td className="px-4 py-3 text-xs font-medium">{item.cutter_name ?? "—"}</td>
-                                <td className="px-4 py-3">
-                                  <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                    {PLATFORM_LABELS[item.platform ?? ""] ?? item.platform ?? "—"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 max-w-48">
-                                  {item.url ? (
-                                    <a
-                                      href={item.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center gap-1 text-xs hover:text-primary truncate"
-                                      title={item.title ?? ""}
-                                    >
-                                      <span className="truncate">{item.title ?? item.url}</span>
-                                      <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
-                                    </a>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground truncate">{item.title ?? "—"}</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-right text-xs font-mono">{formatNum(item.claimed_views)}</td>
-                                <td className="px-4 py-3 text-xs">
-                                  <span className={urgent ? "text-orange-400 font-medium" : "text-muted-foreground"}>
-                                    {formatRelative(item.proof_uploaded_at)}
-                                    {urgent && " ⚠"}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <Link
-                                    href={`/ops/clips/${item.id}`}
-                                    className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-2 py-1 text-xs text-blue-400 hover:bg-blue-500/20 transition-colors"
-                                  >
-                                    <ImageIcon className="h-3 w-3" />
-                                    Prüfen
-                                  </Link>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-            {/* Unverified */}
-            {activeTab === "unverified" && (
-              <div className="rounded-xl border border-orange-500/20 bg-card overflow-hidden">
-                <SectionHeader
-                  title={`Nicht verifiziert seit 3+ Tagen (${counts.unverified})`}
-                  open={openSections.unverified}
-                  onToggle={() => toggleSection("unverified")}
-                />
-                {openSections.unverified && (
-                  data.unverified.length === 0 ? (
-                    <div className="px-5 py-10 text-center text-muted-foreground text-sm">
-                      <HelpCircle className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                      Keine unverifizierte Clips vorhanden
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-muted/20">
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Cutter</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Plattform</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground max-w-48">Clip</th>
-                            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Angabe</th>
-                            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Erstellt</th>
-                            <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Detail</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {data.unverified.map((item) => (
-                            <tr key={item.id} className="hover:bg-muted/30">
-                              <td className="px-4 py-3 text-xs font-medium">{item.cutter_name ?? "—"}</td>
-                              <td className="px-4 py-3">
-                                <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                  {PLATFORM_LABELS[item.platform ?? ""] ?? item.platform ?? "—"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 max-w-48">
-                                {item.url ? (
-                                  <a
-                                    href={item.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-xs hover:text-primary truncate"
-                                    title={item.title ?? ""}
-                                  >
-                                    <span className="truncate">{item.title ?? item.url}</span>
-                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
-                                  </a>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground truncate">{item.title ?? "—"}</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-right text-xs font-mono">{formatNum(item.claimed_views)}</td>
-                              <td className="px-4 py-3 text-xs text-muted-foreground">
-                                {formatRelative(item.created_at)}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Link
-                                  href={`/ops/clips/${item.id}`}
-                                  className="rounded bg-muted px-2 py-1 text-xs hover:bg-accent transition-colors"
-                                >
-                                  Detail
-                                </Link>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-            {/* Empty state */}
-            {counts.total === 0 && (
-              <div className="rounded-xl border border-border bg-card px-5 py-16 text-center">
-                <Bell className="h-10 w-10 mx-auto mb-4 text-emerald-400 opacity-60" />
-                <p className="font-semibold text-emerald-400">Alles in Ordnung!</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Keine offenen Alerts vorhanden.
-                </p>
-              </div>
-            )}
-          </>
         )}
+
+        {/* ── Alert list ── */}
+        {loading && alerts.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+            <RefreshCw className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Lade Alerts…</span>
+          </div>
+        ) : alerts.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card px-6 py-16 text-center">
+            {totalActive === 0 ? (
+              <>
+                <Bell className="h-10 w-10 mx-auto mb-4 text-emerald-400/60" />
+                <p className="font-semibold text-emerald-400">Alles in Ordnung!</p>
+                <p className="text-sm text-muted-foreground mt-1 mb-5">
+                  Keine offenen Alerts. Klicke auf &ldquo;Alerts generieren&rdquo; um alle Videos zu prüfen.
+                </p>
+                <button
+                  onClick={generateAlerts}
+                  disabled={generating}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors mx-auto disabled:opacity-50"
+                >
+                  {generating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Alerts generieren
+                </button>
+              </>
+            ) : (
+              <>
+                <Filter className="h-8 w-8 mx-auto mb-3 text-muted-foreground/20" />
+                <p className="text-sm text-muted-foreground">Keine Alerts für die aktuelle Filterauswahl</p>
+                <button
+                  onClick={() => { setStatusFilter(ACTIVE_STATUSES); setSeverityFilter([]); setTypeFilter([]); }}
+                  className="mt-3 text-xs text-primary hover:underline"
+                >
+                  Filter zurücksetzen
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground/60 px-0.5">
+              {alerts.length} Alert{alerts.length !== 1 ? "s" : ""} · sortiert nach Schweregrad
+              {loading && <RefreshCw className="inline h-3 w-3 animate-spin ml-1.5 opacity-40" />}
+            </p>
+            {alerts.map(alert => (
+              <AlertCard
+                key={alert.id}
+                alert={alert}
+                onAction={doAction}
+                currentUserName={currentUserName}
+              />
+            ))}
+          </div>
+        )}
+
       </main>
     </>
   );

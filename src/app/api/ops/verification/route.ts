@@ -4,6 +4,7 @@ import { ensureDb } from '@/lib/db';
 import { recalculateReliabilityScore } from '@/lib/reliability';
 import { writeAuditLog } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications';
+import { resolveAlert, upsertAlert } from '@/lib/ops-alerts';
 
 export async function GET(request: NextRequest) {
   const auth = await requireOpsAccess(request);
@@ -41,20 +42,24 @@ export async function PATCH(request: NextRequest) {
 
   const db = await ensureDb();
 
-  // Get video to find cutter_id
+  // Get video + cutter info in one query
   const videoResult = await db.execute({
-    sql: `SELECT id, cutter_id FROM cutter_videos WHERE id = ?`,
+    sql: `SELECT v.id, v.cutter_id, v.title, c.name AS cutter_name
+          FROM cutter_videos v JOIN cutters c ON c.id = v.cutter_id
+          WHERE v.id = ?`,
     args: [videoId],
   });
 
-  const video = videoResult.rows[0] as unknown as { id: string; cutter_id: string; title?: string } | undefined;
-  if (!video) {
+  const videoRow = videoResult.rows[0] as Record<string, unknown> | undefined;
+  if (!videoRow) {
     return NextResponse.json({ error: 'Video nicht gefunden' }, { status: 404 });
   }
-
-  // Fetch title for notifications
-  const videoTitleResult = await db.execute({ sql: `SELECT title FROM cutter_videos WHERE id = ?`, args: [videoId] });
-  const videoTitle = (videoTitleResult.rows[0] as Record<string, unknown>)?.title as string | null ?? null;
+  const video = {
+    id: videoRow.id as string,
+    cutter_id: videoRow.cutter_id as string,
+    cutter_name: (videoRow.cutter_name as string) ?? 'Unbekannt',
+  };
+  const videoTitle = (videoRow.title as string | null) ?? null;
 
   const now = new Date().toISOString();
 
@@ -90,6 +95,11 @@ export async function PATCH(request: NextRequest) {
       entityId: videoId,
       dedupWindowHours: 48,
     });
+    // Proof approved → clear proof alert + discrepancy alerts (proof overrides them)
+    await resolveAlert(db, 'proof_submitted', videoId, auth.id, auth.name);
+    await resolveAlert(db, 'proof_overdue',   videoId, auth.id, auth.name);
+    await resolveAlert(db, 'discrepancy_critical',   videoId, auth.id, auth.name);
+    await resolveAlert(db, 'discrepancy_suspicious', videoId, auth.id, auth.name);
 
   } else if (action === 'reject') {
     await db.execute({
@@ -124,6 +134,15 @@ export async function PATCH(request: NextRequest) {
       entityType: 'video',
       entityId: videoId,
       dedupWindowHours: 12,
+    });
+    // Proof rejected → clear submitted alert, open overdue (new proof needed)
+    await resolveAlert(db, 'proof_submitted', videoId, auth.id, auth.name);
+    await upsertAlert(db, {
+      type: 'proof_overdue',
+      videoId,
+      cutterId: video.cutter_id,
+      cutterName: video.cutter_name,
+      meta: { hours_overdue: 0, reason: rejectionReason ?? null },
     });
 
   } else if (action === 'request_proof') {

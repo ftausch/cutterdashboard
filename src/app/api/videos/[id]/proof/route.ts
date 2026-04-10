@@ -4,6 +4,7 @@ import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { recalculateReliabilityScore } from '@/lib/reliability';
 import { createOpsNotification } from '@/lib/notifications';
+import { upsertAlert, resolveAlert } from '@/lib/ops-alerts';
 
 export async function POST(
   request: NextRequest,
@@ -86,6 +87,15 @@ export async function POST(
     entityId: videoId,
     dedupWindowHours: 12,
   });
+
+  // Alert: proof now waiting for review; clear any overdue alert
+  await upsertAlert(db, {
+    type: 'proof_submitted',
+    videoId,
+    cutterId: auth.id,
+    cutterName: auth.name,
+  });
+  await resolveAlert(db, 'proof_overdue', videoId);
 
   return NextResponse.json({ proof_url: blob.url });
 }

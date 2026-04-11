@@ -6,20 +6,17 @@ import { useEffect, useState } from "react";
 import { can, ROLE_LABELS, type Role } from "@/lib/permissions";
 import { NotificationBell } from "@/components/notification-bell";
 import {
-  LayoutDashboard,
-  Video,
+  Scissors,
+  ChevronDown,
+  User,
   Receipt,
   Link2,
-  User,
-  Settings,
-  LogOut,
-  Scissors,
   ShieldCheck,
-  Film,
-  ChevronDown,
-  BarChart2,
   List,
   Bell,
+  BarChart2,
+  Settings,
+  LogOut,
 } from "lucide-react";
 
 interface CutterSession {
@@ -30,32 +27,22 @@ interface CutterSession {
   role: Role;
 }
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/videos", label: "Videos", icon: Video },
-  { href: "/performance", label: "Performance", icon: BarChart2 },
-  { href: "/episodes", label: "Episoden", icon: Film },
-  { href: "/invoices", label: "Rechnungen", icon: Receipt },
-  { href: "/accounts", label: "Konten", icon: Link2 },
-];
+// The only 4 items shown directly in the top bar
+const PRIMARY_NAV = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/videos",    label: "Videos"     },
+  { href: "/performance", label: "Performance" },
+  { href: "/episodes",  label: "Episoden"   },
+] as const;
 
 function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-function getRoleLabel(role: string): string {
-  return ROLE_LABELS[role as Role] ?? role;
+  return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 }
 
 export function CutterNav() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [session, setSession] = useState<CutterSession | null>(null);
+  const pathname  = usePathname();
+  const router    = useRouter();
+  const [session, setSession]   = useState<CutterSession | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -68,7 +55,6 @@ export function CutterNav() {
       .catch(() => router.push("/login"));
   }, [router]);
 
-  // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const handler = () => setMenuOpen(false);
@@ -81,165 +67,136 @@ export function CutterNav() {
     router.push("/login");
   }
 
-  if (!session) return (
-    <header className="sticky top-0 z-50 border-b border-border bg-card/90 backdrop-blur-md h-14" />
-  );
+  if (!session) {
+    return <header className="sticky top-0 z-50 border-b border-border bg-card/90 backdrop-blur-md h-14" />;
+  }
+
+  const isOps   = can(session.role, "OPS_READ");
+  const isAdmin = can(session.role, "USER_MANAGE");
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-card/90 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4">
+    <header className="sticky top-0 z-50 border-b border-border/60 bg-card/90 backdrop-blur-md">
+      <div className="mx-auto flex h-14 max-w-6xl items-center px-4 gap-8">
 
         {/* Logo */}
         <Link
           href="/dashboard"
-          className="flex items-center gap-2 font-bold text-foreground shrink-0 group"
+          className="flex items-center gap-2 shrink-0 group"
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/25 transition-colors">
-            <Scissors className="h-4 w-4 text-primary" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 group-hover:bg-primary/20 transition-colors">
+            <Scissors className="h-3.5 w-3.5 text-primary" />
           </div>
-          <span className="hidden sm:block">Cutter</span>
+          <span className="font-semibold text-sm tracking-tight hidden sm:block">Cutter</span>
         </Link>
 
-        {/* Divider */}
-        <div className="h-5 w-px bg-border shrink-0" />
-
-        {/* Navigation */}
-        <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none flex-1">
-          {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
+        {/* Primary nav — 4 items, text-only */}
+        <nav className="flex items-center gap-1 flex-1">
+          {PRIMARY_NAV.map(({ href, label }) => {
+            const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
             return (
               <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                  isActive
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                key={href}
+                href={href}
+                className={`px-3 py-1.5 rounded-lg text-sm transition-colors duration-150 ${
+                  active
+                    ? "text-foreground font-medium bg-accent/60"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/40 font-normal"
                 }`}
               >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span className="hidden md:block">{item.label}</span>
+                {label}
               </Link>
             );
           })}
-
-          {can(session.role, "OPS_READ") && (
-            <Link
-              href="/ops"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                pathname === "/ops" || (pathname.startsWith("/ops") && !pathname.startsWith("/ops/clips"))
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-            >
-              <ShieldCheck className="h-4 w-4 shrink-0" />
-              <span className="hidden md:block">Ops</span>
-            </Link>
-          )}
-
-          {can(session.role, "OPS_READ") && (
-            <Link
-              href="/ops/clips"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                pathname.startsWith("/ops/clips")
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-            >
-              <List className="h-4 w-4 shrink-0" />
-              <span className="hidden md:block">Clips</span>
-            </Link>
-          )}
-
-          {can(session.role, "ALERT_MANAGE") && (
-            <Link
-              href="/ops/alerts"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                pathname.startsWith("/ops/alerts")
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-            >
-              <Bell className="h-4 w-4 shrink-0" />
-              <span className="hidden md:block">Alerts</span>
-            </Link>
-          )}
-
-          {can(session.role, "ANALYTICS_READ") && (
-            <Link
-              href="/ops/analytics"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                pathname.startsWith("/ops/analytics")
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-            >
-              <BarChart2 className="h-4 w-4 shrink-0" />
-              <span className="hidden md:block">Analytics</span>
-            </Link>
-          )}
-
-          {can(session.role, "USER_MANAGE") && (
-            <Link
-              href="/admin"
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                pathname.startsWith("/admin")
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              }`}
-            >
-              <Settings className="h-4 w-4 shrink-0" />
-              <span className="hidden md:block">Admin</span>
-            </Link>
-          )}
         </nav>
 
-        {/* Notification Bell */}
-        <NotificationBell />
+        {/* Right side: bell + avatar */}
+        <div className="flex items-center gap-1 shrink-0">
+          <NotificationBell />
 
-        {/* User menu */}
-        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => setMenuOpen((p) => !p)}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-accent/60 transition-colors"
-          >
-            {/* Avatar */}
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
-              {getInitials(session.name)}
-            </div>
-            <div className="hidden sm:block text-left">
-              <p className="text-xs font-medium leading-tight">{session.name.split(" ")[0]}</p>
-              <p className="text-xs text-muted-foreground leading-tight">{getRoleLabel(session.role)}</p>
-            </div>
-            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${menuOpen ? "rotate-180" : ""}`} />
-          </button>
-
-          {/* Dropdown */}
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1.5 w-52 rounded-xl border border-border bg-card p-1 shadow-xl">
-              <div className="px-3 py-2 border-b border-border mb-1">
-                <p className="text-sm font-medium truncate">{session.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{session.email}</p>
+          {/* Profile dropdown */}
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setMenuOpen((p) => !p)}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-accent/60 transition-colors"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
+                {getInitials(session.name)}
               </div>
-              <Link
-                href="/profile"
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <User className="h-4 w-4" />
-                Profil & Rechnungsdaten
-              </Link>
-              <button
-                onClick={handleLogout}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Abmelden
-              </button>
-            </div>
-          )}
+              <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-150 ${menuOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-56 rounded-xl border border-border bg-card shadow-xl p-1 z-50">
+                {/* Identity */}
+                <div className="px-3 py-2.5 mb-1">
+                  <p className="text-sm font-medium truncate">{session.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{session.email}</p>
+                  <p className="text-xs text-primary/70 mt-0.5">{ROLE_LABELS[session.role]}</p>
+                </div>
+
+                <div className="h-px bg-border mx-1 mb-1" />
+
+                {/* My account */}
+                <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                  Konto
+                </p>
+                <DropdownLink href="/profile"  icon={User}    label="Profil & Rechnungsdaten" onClick={() => setMenuOpen(false)} />
+                <DropdownLink href="/invoices" icon={Receipt}  label="Rechnungen"              onClick={() => setMenuOpen(false)} />
+                <DropdownLink href="/accounts" icon={Link2}    label="Konten verwalten"        onClick={() => setMenuOpen(false)} />
+
+                {/* Ops section */}
+                {isOps && (
+                  <>
+                    <div className="h-px bg-border mx-1 my-1" />
+                    <p className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                      Ops
+                    </p>
+                    <DropdownLink href="/ops"           icon={ShieldCheck} label="Übersicht"  onClick={() => setMenuOpen(false)} />
+                    <DropdownLink href="/ops/clips"     icon={List}        label="Clips"       onClick={() => setMenuOpen(false)} />
+                    <DropdownLink href="/ops/alerts"    icon={Bell}        label="Alerts"      onClick={() => setMenuOpen(false)} />
+                    <DropdownLink href="/ops/analytics" icon={BarChart2}   label="Analytics"   onClick={() => setMenuOpen(false)} />
+                    {isAdmin && (
+                      <DropdownLink href="/admin" icon={Settings} label="Admin" onClick={() => setMenuOpen(false)} />
+                    )}
+                  </>
+                )}
+
+                {/* Logout */}
+                <div className="h-px bg-border mx-1 my-1" />
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Abmelden
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+
       </div>
     </header>
+  );
+}
+
+// Small helper to keep the dropdown rows DRY
+function DropdownLink({
+  href, icon: Icon, label, onClick,
+}: {
+  href: string;
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {label}
+    </Link>
   );
 }

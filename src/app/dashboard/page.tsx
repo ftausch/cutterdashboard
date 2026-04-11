@@ -6,8 +6,8 @@ import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
   Eye, Video, Euro, TrendingUp, Clock, Plus, Receipt,
-  CheckCircle, Circle, User, Link2, Upload, ArrowRight,
-  Sparkles, ChevronRight, ShieldCheck,
+  CheckCircle, User, Link2, Upload, ArrowRight,
+  Sparkles, ChevronRight, ShieldCheck, RefreshCw,
 } from "lucide-react";
 
 interface Onboarding {
@@ -292,6 +292,43 @@ export default function CutterDashboard() {
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionName, setSessionName] = useState<string>("");
+  const [syncing, setSyncing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  async function loadData() {
+    const [statsRes, videosRes] = await Promise.all([
+      fetch("/api/stats"),
+      fetch("/api/videos"),
+    ]);
+    if (statsRes.status === 401) { router.push("/login"); return; }
+    const statsData = await statsRes.json();
+    const videosData = await videosRes.json();
+    if (statsData) setStats(statsData);
+    if (videosData?.videos) setVideos(videosData.videos.slice(0, 5));
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/sync/views", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setLastSynced(new Date().toISOString());
+        setSyncMsg(`${data.updated} von ${data.total} Videos aktualisiert`);
+        await loadData();
+      } else if (res.status === 429) {
+        setSyncMsg(data.error || "Bitte warte kurz bis zum nächsten Sync.");
+      } else {
+        setSyncMsg(data.error || "Sync fehlgeschlagen");
+      }
+    } catch {
+      setSyncMsg("Sync fehlgeschlagen");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   useEffect(() => {
     // Load session name separately for faster greeting render
@@ -330,11 +367,32 @@ export default function CutterDashboard() {
             <h1 className="text-2xl font-bold tracking-tight">
               {getGreeting()}{sessionName ? `, ${sessionName}` : ""}
             </h1>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}
-            </p>
+            <div className="mt-0.5 flex items-center gap-2">
+              <p className="text-xs text-muted-foreground">
+                {new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}
+              </p>
+              {syncMsg && (
+                <span className={`text-xs ${syncMsg.includes("fehlgeschlagen") || syncMsg.includes("warte") ? "text-red-400" : "text-emerald-400"}`}>
+                  · {syncMsg}
+                </span>
+              )}
+              {lastSynced && !syncMsg && (
+                <span className="text-xs text-muted-foreground/60">
+                  · Sync {new Date(lastSynced).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              title="Views jetzt aktualisieren"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:block">{syncing ? "Sync…" : "Sync"}</span>
+            </button>
             <Link
               href="/videos/submit"
               className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"

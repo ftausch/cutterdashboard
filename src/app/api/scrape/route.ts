@@ -4,11 +4,12 @@ import { ensureDb } from '@/lib/db';
 import { scrapeAllCutterVideos } from '@/lib/cutter/scraper';
 import { cleanExpiredSessions } from '@/lib/cutter/auth';
 import {
-  getVerificationStatus,
+  resolveVerificationSource,
+  resolveVerificationStatus,
   calculateDiscrepancy,
-  shouldGenerateAlert,
-  type DiscrepancyStatus,
+  shouldAlert,
 } from '@/lib/verification/discrepancy';
+import type { DiscrepancyStatus } from '@/lib/verification/types';
 
 interface VideoRow {
   id: string;
@@ -89,16 +90,20 @@ export async function POST(request: NextRequest) {
   for (const result of results) {
     const video = videos.find((v) => v.id === result.id)!;
     const scrapeSuccess = result.views !== null;
-    const verificationStatus = getVerificationStatus(
+    const source = resolveVerificationSource(
       video.platform,
-      scrapeSuccess,
+      video.platform === 'youtube', // YouTube uses official API key
+      scrapeSuccess && video.platform !== 'youtube', // others use scraping
+      false,
       video.claimed_views !== null
     );
 
     const { status: discrepancyStatus, percent: discrepancyPercent } =
       scrapeSuccess
-        ? calculateDiscrepancy(result.views, video.claimed_views, verificationStatus)
-        : { status: 'cannot_verify' as const, percent: null };
+        ? calculateDiscrepancy(result.views, video.claimed_views, source)
+        : { status: 'cannot_verify' as DiscrepancyStatus, percent: null };
+
+    const verificationStatus = resolveVerificationStatus(source, discrepancyStatus, null);
 
     // Write snapshot for every result (success and failure)
     stmts.push({
@@ -142,8 +147,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate alert if discrepancy is suspicious or critical and no open alert exists
-    const alertInfo = shouldGenerateAlert(discrepancyStatus as DiscrepancyStatus);
-    if (alertInfo.generate && !existingAlertVideoIds.has(result.id)) {
+    const alertInfo = shouldAlert(discrepancyStatus);
+    if (alertInfo.alert && !existingAlertVideoIds.has(result.id)) {
       const pctLabel = discrepancyPercent !== null ? ` (${discrepancyPercent}%)` : '';
       stmts.push({
         sql: `INSERT INTO alerts (id, cutter_id, video_id, alert_type, severity, title, description, status, created_at)

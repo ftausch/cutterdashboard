@@ -83,15 +83,18 @@ function DashboardSkeleton() {
           <div className="skeleton h-7 w-64 mb-2" />
           <div className="skeleton h-4 w-40" />
         </div>
-        {/* Stat cards skeleton */}
-        <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="rounded-xl border border-border bg-card p-4">
-              <div className="skeleton h-4 w-4 mb-3" />
-              <div className="skeleton h-7 w-16 mb-1" />
-              <div className="skeleton h-3 w-20" />
-            </div>
-          ))}
+        {/* Stat + reliability skeleton */}
+        <div className="mb-8 grid gap-4 lg:grid-cols-5">
+          <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="rounded-xl border border-border bg-card p-3">
+                <div className="skeleton h-4 w-4 mb-2.5" />
+                <div className="skeleton h-6 w-14 mb-1" />
+                <div className="skeleton h-3 w-20" />
+              </div>
+            ))}
+          </div>
+          <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5 h-40" />
         </div>
         {/* Table skeleton */}
         <div className="rounded-xl border border-border bg-card">
@@ -224,43 +227,39 @@ function ReliabilityWidget({ score, trustScore, performanceScore }: {
   const label = getScoreLabel(score);
   const meta = SCORE_LABEL_META[label];
   return (
-    <div className={`rounded-xl border ${meta.border} ${meta.bg} p-4`}>
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Icon + label */}
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${meta.bg} border ${meta.border}`}>
-          <ShieldCheck className={`h-5 w-5 ${meta.color}`} />
+    <div className={`h-full rounded-xl border ${meta.border} ${meta.bg} p-5 flex flex-col justify-between`}>
+      {/* Top: score + badge */}
+      <div>
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className={`h-4 w-4 ${meta.color}`} />
+            <span className="text-xs font-medium text-muted-foreground">Zuverlässigkeit</span>
+          </div>
+          <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${meta.bg} ${meta.color} border ${meta.border}`}>
+            {meta.de}
+          </span>
         </div>
-        {/* Score */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-2xl font-black tabular-nums ${meta.color}`}>{score}</span>
-            <span className="text-muted-foreground text-sm">/100</span>
-            <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${meta.bg} ${meta.color} border ${meta.border}`}>
-              {meta.de}
-            </span>
-          </div>
-          <div className="mt-1.5 flex items-center gap-3">
-            <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted/50">
-              <div className={`h-full rounded-full ${meta.barColor}`} style={{ width: `${score}%` }} />
-            </div>
-          </div>
+        <div className="flex items-baseline gap-1.5 mb-3">
+          <span className={`text-4xl font-black tabular-nums leading-none ${meta.color}`}>{score}</span>
+          <span className="text-sm text-muted-foreground">/100</span>
         </div>
-        {/* Sub-scores */}
-        <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
-          <div className="text-center">
-            <p className="font-semibold text-foreground text-sm">{trustScore}</p>
-            <p>Trust</p>
-          </div>
-          <div className="text-center">
-            <p className="font-semibold text-foreground text-sm">{performanceScore}</p>
-            <p>Performance</p>
-          </div>
+        {/* Progress bar */}
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/40 mb-4">
+          <div className={`h-full rounded-full transition-all ${meta.barColor}`} style={{ width: `${score}%` }} />
         </div>
       </div>
-      <p className="mt-2.5 text-xs text-muted-foreground">
-        Dein <span className="font-medium text-foreground">Zuverlässigkeits-Score</span> basiert auf Angaben-Genauigkeit, Belegen und Performance.
-        Er wird täglich aktualisiert. <span className="text-muted-foreground/60">Trust = 70%, Performance = 30%.</span>
-      </p>
+      {/* Sub-scores */}
+      <div className="flex items-center gap-4 border-t border-border/50 pt-3">
+        <div className="flex-1">
+          <p className={`text-lg font-bold tabular-nums ${meta.color}`}>{trustScore}</p>
+          <p className="text-xs text-muted-foreground">Trust <span className="opacity-50">70%</span></p>
+        </div>
+        <div className="w-px h-8 bg-border/50" />
+        <div className="flex-1">
+          <p className={`text-lg font-bold tabular-nums ${meta.color}`}>{performanceScore}</p>
+          <p className="text-xs text-muted-foreground">Performance <span className="opacity-50">30%</span></p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -277,7 +276,7 @@ function StatCard({
   href?: string;
 }) {
   const inner = (
-    <div className={`relative rounded-xl border p-4 h-full transition-all duration-200 card-hover ${
+    <div className={`relative rounded-xl border p-3 h-full transition-all duration-200 card-hover ${
       highlight
         ? "border-primary/30 bg-primary/8"
         : "border-border bg-card"
@@ -285,14 +284,14 @@ function StatCard({
       {highlight && (
         <div className="absolute inset-x-0 top-0 h-0.5 rounded-t-xl bg-primary opacity-60" />
       )}
-      <div className={`mb-2 ${highlight ? "text-primary" : "text-muted-foreground"}`}>
+      <div className={`mb-1.5 ${highlight ? "text-primary" : "text-muted-foreground"}`}>
         {icon}
       </div>
-      <p className={`text-xl font-bold tabular-nums ${highlight ? "text-primary" : ""}`}>
+      <p className={`text-lg font-bold tabular-nums ${highlight ? "text-primary" : ""}`}>
         {value}
       </p>
       {sub && <p className="text-xs font-medium text-primary mt-0.5">{sub}</p>}
-      <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
     </div>
   );
 
@@ -348,8 +347,8 @@ export default function CutterDashboard() {
         {/* Greeting */}
         <div className="mb-7 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">
-              {getGreeting()}{sessionName ? `, ${sessionName}` : ""} 👋
+            <h1 className="text-3xl font-black tracking-tight">
+              {getGreeting()}{sessionName ? `, ${sessionName}` : ""}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
               {new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}
@@ -405,44 +404,46 @@ export default function CutterDashboard() {
           </div>
         )}
 
-        {/* KPI Cards */}
+        {/* KPI + Reliability two-column layout */}
         {stats && (
-          <div className="mb-7 grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <StatCard
-              icon={<Video className="h-5 w-5" />}
-              label="Videos"
-              value={formatNum(stats.videoCount)}
-            />
-            <StatCard
-              icon={<Eye className="h-5 w-5" />}
-              label="Gesamte Views"
-              value={formatNum(stats.totalViews)}
-            />
-            <StatCard
-              icon={<Euro className="h-5 w-5" />}
-              label="Gesamtverdienst"
-              value={formatEur(stats.totalEarnings)}
-            />
-            <StatCard
-              icon={<TrendingUp className="h-5 w-5" />}
-              label="Letzte 30 Tage"
-              value={formatEur(stats.earnings30d)}
-            />
-            <StatCard
-              icon={<Clock className="h-5 w-5" />}
-              label="Nicht abgerechnet"
-              value={formatNum(stats.unbilledViews)}
-              sub={formatEur(stats.unbilledAmount)}
-              highlight
-              href="/invoices"
-            />
-          </div>
-        )}
-
-        {/* Reliability Score Widget */}
-        {stats && stats.reliabilityScore != null && (
-          <div className="mb-7">
-            <ReliabilityWidget score={stats.reliabilityScore} trustScore={stats.trustScore ?? 0} performanceScore={stats.performanceScore ?? 0} />
+          <div className="mb-7 grid gap-4 lg:grid-cols-5">
+            {/* 4 compact KPI cards */}
+            <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-3 content-start">
+              <StatCard
+                icon={<Video className="h-4 w-4" />}
+                label="Videos"
+                value={formatNum(stats.videoCount)}
+              />
+              <StatCard
+                icon={<Eye className="h-4 w-4" />}
+                label="Gesamte Views"
+                value={formatNum(stats.totalViews)}
+              />
+              <StatCard
+                icon={<Euro className="h-4 w-4" />}
+                label="Gesamtverdienst"
+                value={formatEur(stats.totalEarnings)}
+              />
+              <StatCard
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Letzte 30 Tage"
+                value={formatEur(stats.earnings30d)}
+              />
+            </div>
+            {/* Reliability score card */}
+            {stats.reliabilityScore != null ? (
+              <div className="lg:col-span-2">
+                <ReliabilityWidget
+                  score={stats.reliabilityScore}
+                  trustScore={stats.trustScore ?? 0}
+                  performanceScore={stats.performanceScore ?? 0}
+                />
+              </div>
+            ) : (
+              <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5 flex items-center justify-center">
+                <p className="text-xs text-muted-foreground">Noch kein Score verfügbar</p>
+              </div>
+            )}
           </div>
         )}
 

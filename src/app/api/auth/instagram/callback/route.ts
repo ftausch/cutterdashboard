@@ -109,30 +109,48 @@ export async function GET(request: NextRequest) {
       args: [cutter.id],
     });
 
+    const capabilityFlags = JSON.stringify({
+      official_api:         true,
+      views_available:      true,
+      video_list_available: true,
+      clip_level_metrics:   true,
+      note:                 'Requires Business or Creator account for video insights',
+    });
+
     if (existing.rows[0]) {
       // UPDATE existing row
       await db.execute({
         sql: `UPDATE cutter_accounts
-              SET oauth_access_token = ?,
-                  oauth_token_expires_at = ?,
-                  instagram_user_id = ?,
-                  account_handle = ?
+              SET oauth_access_token      = ?,
+                  oauth_token_expires_at  = ?,
+                  instagram_user_id       = ?,
+                  platform_user_id        = ?,
+                  account_handle          = ?,
+                  connection_status       = 'connected',
+                  connection_type         = 'oauth',
+                  views_accessible        = 1,
+                  verification_confidence = 'medium',
+                  capability_flags        = ?,
+                  sync_error              = NULL,
+                  updated_at              = datetime('now')
               WHERE cutter_id = ? AND platform = 'instagram'`,
-        args: [longToken, expiresAt, instagramUserId, instagramUsername, cutter.id],
+        args: [longToken, expiresAt, instagramUserId, instagramUserId, instagramUsername, capabilityFlags, cutter.id],
       });
     } else {
       // INSERT new row
       await db.execute({
         sql: `INSERT INTO cutter_accounts
-                (id, cutter_id, platform, account_handle, oauth_access_token, oauth_token_expires_at, instagram_user_id)
-              VALUES (?, ?, 'instagram', ?, ?, ?, ?)`,
+                (id, cutter_id, platform, account_handle,
+                 oauth_access_token, oauth_token_expires_at,
+                 instagram_user_id, platform_user_id,
+                 connection_status, connection_type,
+                 views_accessible, verification_confidence, capability_flags)
+              VALUES (?, ?, 'instagram', ?, ?, ?, ?, ?, 'connected', 'oauth', 1, 'medium', ?)`,
         args: [
-          randomUUID(),
-          cutter.id,
-          instagramUsername,
-          longToken,
-          expiresAt,
-          instagramUserId,
+          randomUUID(), cutter.id,
+          instagramUsername, longToken, expiresAt,
+          instagramUserId, instagramUserId,
+          capabilityFlags,
         ],
       });
     }

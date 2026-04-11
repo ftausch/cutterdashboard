@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOpsAccess, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { recalculateReliabilityScore } from '@/lib/reliability';
 import { writeAuditLog } from '@/lib/audit';
@@ -7,7 +7,7 @@ import { createNotification } from '@/lib/notifications';
 import { resolveAlert, upsertAlert } from '@/lib/ops-alerts';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const db = await ensureDb();
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const { videoId, action, notes, rejectionReason } = await request.json();

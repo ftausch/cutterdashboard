@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSessionFromCookie } from '@/lib/cutter/auth';
+import { can, type Role } from '@/lib/permissions';
 import { ensureDb } from '@/lib/db';
 import { upsertAlert, resolveAlert } from '@/lib/ops-alerts';
 
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   if (!isCronCall) {
     const cookieStore = await cookies();
     const session = await getSessionFromCookie(cookieStore.get('cutter_session')?.value);
-    if (!session || (session.role !== 'super_admin' && session.role !== 'ops_manager')) {
+    if (!session || !can(session.role as Role, 'ALERT_MANAGE')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
   }

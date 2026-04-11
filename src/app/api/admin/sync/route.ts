@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSessionFromCookie } from '@/lib/cutter/auth';
+import { can, type Role } from '@/lib/permissions';
 import { runSync, startSyncLog, writeSyncLog } from '@/lib/sync/engine';
 
 export const maxDuration = 300;
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
     cookieStore.get('cutter_session')?.value
   );
 
-  if (!session || session.role !== 'super_admin') {
+  if (!session || !can(session.role as Role, 'SYSTEM_SETTINGS')) {
     return NextResponse.json({ error: 'Kein Zugriff' }, { status: 403 });
   }
 
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     cookieStore.get('cutter_session')?.value
   );
 
-  if (!session || (session.role !== 'super_admin' && session.role !== 'ops_manager')) {
+  if (!session || !can(session.role as Role, 'SCRAPE_STATUS')) {
     return NextResponse.json({ error: 'Kein Zugriff' }, { status: 403 });
   }
 

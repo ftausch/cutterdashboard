@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOpsAccess, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { writeAuditLog } from '@/lib/audit';
 import { randomUUID } from 'crypto';
@@ -8,7 +8,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const { id: videoId } = await params;
@@ -30,7 +30,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const { id: videoId } = await params;

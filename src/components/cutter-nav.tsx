@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { can, ROLE_LABELS, type Role } from "@/lib/permissions";
 import { NotificationBell } from "@/components/notification-bell";
 import {
   LayoutDashboard,
@@ -26,7 +27,7 @@ interface CutterSession {
   name: string;
   email: string;
   is_admin: boolean;
-  role: "super_admin" | "ops_manager" | "cutter";
+  role: Role;
 }
 
 const navItems = [
@@ -48,9 +49,7 @@ function getInitials(name: string): string {
 }
 
 function getRoleLabel(role: string): string {
-  if (role === "super_admin") return "Admin";
-  if (role === "ops_manager") return "Ops Manager";
-  return "Cutter";
+  return ROLE_LABELS[role as Role] ?? role;
 }
 
 export function CutterNav() {
@@ -124,7 +123,7 @@ export function CutterNav() {
             );
           })}
 
-          {(session.role === "super_admin" || session.role === "ops_manager") && (
+          {can(session.role, "OPS_READ") && (
             <Link
               href="/ops"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
@@ -138,7 +137,7 @@ export function CutterNav() {
             </Link>
           )}
 
-          {(session.role === "super_admin" || session.role === "ops_manager") && (
+          {can(session.role, "OPS_READ") && (
             <Link
               href="/ops/clips"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
@@ -152,7 +151,7 @@ export function CutterNav() {
             </Link>
           )}
 
-          {(session.role === "super_admin" || session.role === "ops_manager") && (
+          {can(session.role, "ALERT_MANAGE") && (
             <Link
               href="/ops/alerts"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
@@ -166,7 +165,7 @@ export function CutterNav() {
             </Link>
           )}
 
-          {(session.role === "super_admin" || session.role === "ops_manager") && (
+          {can(session.role, "ANALYTICS_READ") && (
             <Link
               href="/ops/analytics"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${
@@ -180,7 +179,7 @@ export function CutterNav() {
             </Link>
           )}
 
-          {session.role === "super_admin" && (
+          {can(session.role, "USER_MANAGE") && (
             <Link
               href="/admin"
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all duration-150 ${

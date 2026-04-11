@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireCutterAdmin, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireCutterAdmin(request);
+  const auth = await requirePermission(request, 'USER_MANAGE');
   if (!isCutter(auth)) return auth;
 
   const db = await ensureDb();
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const auth = await requireCutterAdmin(request);
+  const auth = await requirePermission(request, 'USER_MANAGE');
   if (!isCutter(auth)) return auth;
 
   const { key, value } = await request.json();

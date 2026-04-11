@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { ensureDb } from '@/lib/db';
 
-export type CutterRole = 'super_admin' | 'ops_manager' | 'cutter';
+export type CutterRole = 'super_admin' | 'ops_manager' | 'cutter' | 'viewer';
 
 export interface CutterRow {
   id: string;
@@ -18,10 +18,12 @@ export interface CutterRow {
   created_at: string;
 }
 
+/** @deprecated Use can(role, 'OPS_READ') from @/lib/permissions instead */
 export function hasOpsAccess(cutter: CutterRow): boolean {
   return cutter.role === 'super_admin' || cutter.role === 'ops_manager';
 }
 
+/** @deprecated Use can(role, 'USER_MANAGE') from @/lib/permissions instead */
 export function isSuperAdmin(cutter: CutterRow): boolean {
   return cutter.role === 'super_admin';
 }

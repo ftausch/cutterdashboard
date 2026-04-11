@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import { requireCutterAdmin, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { writeAuditLog } from '@/lib/audit';
+import type { Role } from '@/lib/permissions';
+
+const VALID_ROLES: Role[] = ['super_admin', 'ops_manager', 'cutter', 'viewer'];
 
 export async function GET(request: NextRequest) {
-  const auth = await requireCutterAdmin(request);
+  const auth = await requirePermission(request, 'USER_MANAGE');
   if (!isCutter(auth)) return auth;
 
   const db = await ensureDb();
@@ -21,7 +24,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireCutterAdmin(request);
+  const auth = await requirePermission(request, 'USER_MANAGE');
   if (!isCutter(auth)) return auth;
 
   const { name, email, rate_per_view } = await request.json();
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireCutterAdmin(request);
+  const auth = await requirePermission(request, 'USER_MANAGE');
   if (!isCutter(auth)) return auth;
 
   const { id, ...updates } = await request.json();
@@ -60,7 +63,13 @@ export async function PATCH(request: NextRequest) {
   }
 
   const db = await ensureDb();
-  const allowedFields = ['name', 'email', 'rate_per_view', 'is_active', 'is_admin'];
+
+  // Validate role if provided
+  if ('role' in updates && !VALID_ROLES.includes(updates.role as Role)) {
+    return NextResponse.json({ error: `Ungültige Rolle: ${updates.role}` }, { status: 400 });
+  }
+
+  const allowedFields = ['name', 'email', 'rate_per_view', 'is_active', 'role'];
   const sets: string[] = [];
   const values: (string | number)[] = [];
 
@@ -69,6 +78,12 @@ export async function PATCH(request: NextRequest) {
       sets.push(`${field} = ?`);
       values.push(updates[field]);
     }
+  }
+
+  // Keep is_admin in sync with role for backward compatibility
+  if ('role' in updates) {
+    sets.push('is_admin = ?');
+    values.push(updates.role === 'super_admin' ? 1 : 0);
   }
 
   if (sets.length === 0) {

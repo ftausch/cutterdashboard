@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireCutterAuth(request);
+  const auth = await requirePermission(request, 'INVOICE_READ');
   if (!isCutter(auth)) return auth;
 
   const db = await ensureDb();

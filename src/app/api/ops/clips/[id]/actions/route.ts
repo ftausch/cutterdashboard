@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getSessionFromCookie } from '@/lib/cutter/auth';
+import { can, type Role } from '@/lib/permissions';
 import { randomUUID } from 'crypto';
 
 async function dbQuery(sql: string, args: unknown[] = []) {
@@ -54,8 +55,8 @@ export async function POST(
   const cookieStore = await cookies();
   const session = await getSessionFromCookie(cookieStore.get('cutter_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (session.role !== 'super_admin' && session.role !== 'ops_manager') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!can(session.role as Role, 'OPS_WRITE')) {
+    return NextResponse.json({ error: 'Keine Berechtigung' }, { status: 403 });
   }
 
   const { id } = await params;

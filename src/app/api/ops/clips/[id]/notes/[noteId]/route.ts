@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOpsAccess, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
+import { can, type Role } from '@/lib/permissions';
 import { ensureDb } from '@/lib/db';
 import { writeAuditLog } from '@/lib/audit';
 
@@ -7,7 +8,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; noteId: string }> }
 ) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'NOTE_CREATE');
   if (!isCutter(auth)) return auth;
 
   const { id: videoId, noteId } = await params;
@@ -31,8 +32,8 @@ export async function PATCH(
     return NextResponse.json({ error: 'Notiz nicht gefunden' }, { status: 404 });
   }
 
-  // Only author or super_admin can edit
-  if (note.author_id !== auth.id && auth.role !== 'super_admin') {
+  // Only author or admin can edit
+  if (note.author_id !== auth.id && !can(auth.role as Role, 'NOTE_DELETE_ANY')) {
     return NextResponse.json({ error: 'Keine Berechtigung' }, { status: 403 });
   }
 
@@ -53,7 +54,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; noteId: string }> }
 ) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'NOTE_CREATE');
   if (!isCutter(auth)) return auth;
 
   const { id: videoId, noteId } = await params;
@@ -71,8 +72,8 @@ export async function DELETE(
     return NextResponse.json({ error: 'Notiz nicht gefunden' }, { status: 404 });
   }
 
-  // Only author or super_admin can delete
-  if (note.author_id !== auth.id && auth.role !== 'super_admin') {
+  // Only author or admin can delete
+  if (note.author_id !== auth.id && !can(auth.role as Role, 'NOTE_DELETE_ANY')) {
     return NextResponse.json({ error: 'Keine Berechtigung' }, { status: 403 });
   }
 

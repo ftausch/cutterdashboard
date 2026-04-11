@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOpsAccess, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 
 // GET /api/ops/alerts
@@ -11,7 +11,7 @@ import { ensureDb } from '@/lib/db';
 //   offset   — default 0
 
 export async function GET(request: NextRequest) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const { searchParams } = new URL(request.url);

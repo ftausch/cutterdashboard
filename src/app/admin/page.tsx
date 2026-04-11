@@ -12,6 +12,7 @@ interface Cutter {
   rate_per_view: number;
   is_active: number;
   is_admin: number;
+  role: "super_admin" | "ops_manager" | "cutter" | "viewer";
   video_count: number;
   total_invoiced: number;
   total_views: number;
@@ -224,6 +225,7 @@ export default function CutterAdminPage() {
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">E-Mail</th>
+                    <th className="px-4 py-3 font-medium">Rolle</th>
                     <th className="px-4 py-3 font-medium text-right">Rate/View</th>
                     <th className="px-4 py-3 font-medium text-right">Videos</th>
                     <th className="px-4 py-3 font-medium text-right">Views</th>
@@ -236,6 +238,18 @@ export default function CutterAdminPage() {
                     <tr key={c.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{c.name}</td>
                       <td className="px-4 py-3 text-muted-foreground">{c.email}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={c.role ?? "cutter"}
+                          onChange={(e) => handleUpdateCutter(c.id, "role", e.target.value)}
+                          className="h-7 rounded border border-input bg-background px-1.5 text-xs outline-none focus:border-primary"
+                        >
+                          <option value="super_admin">Admin</option>
+                          <option value="ops_manager">Ops Manager</option>
+                          <option value="cutter">Cutter</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <input
                           type="number"

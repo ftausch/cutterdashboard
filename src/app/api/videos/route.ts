@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
+import { requireCutterAuth, requirePermission, isCutter } from '@/lib/cutter/middleware';
+import { can, type Role } from '@/lib/permissions';
 import { ensureDb } from '@/lib/db';
 import { parsePlatformUrl } from '@/lib/cutter/helpers';
 import { scrapeVideoViews } from '@/lib/cutter/scraper';
@@ -17,14 +18,23 @@ export async function GET(request: NextRequest) {
        FROM cutter_videos WHERE cutter_id = ? ORDER BY created_at DESC`,
     args: [auth.id],
   });
-  // Note: claimed_views, verification_status, discrepancy_status, discrepancy_percent
-  // are included automatically via SELECT *
 
-  return NextResponse.json({ videos: result.rows });
+  // Strip ops-only sensitive fields for cutter / viewer roles
+  const hasSensitiveAccess = can(auth.role as Role, 'CLIP_SENSITIVE_FIELDS');
+  const videos = hasSensitiveAccess
+    ? result.rows
+    : result.rows.map((row) => {
+        const { discrepancy_percent, confidence_level, flag_reason, review_notes, ...rest } =
+          row as Record<string, unknown>;
+        void discrepancy_percent; void confidence_level; void flag_reason; void review_notes;
+        return rest;
+      });
+
+  return NextResponse.json({ videos });
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireCutterAuth(request);
+  const auth = await requirePermission(request, 'CLIP_SUBMIT');
   if (!isCutter(auth)) return auth;
 
   const { urls } = await request.json();

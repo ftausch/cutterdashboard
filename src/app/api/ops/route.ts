@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOpsAccess, isCutter } from '@/lib/cutter/middleware';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { writeAuditLog } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const db = await ensureDb();
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireOpsAccess(request);
+  const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
 
   const { alertId, status } = await request.json();

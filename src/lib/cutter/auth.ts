@@ -78,12 +78,46 @@ export async function verifyMagicToken(
   return { sessionToken, cutter };
 }
 
+// ─── Session Cache ─────────────────────────────────────────────────
+// Module-level cache — survives across requests on a warm Vercel function.
+// TTL: 60 seconds. Avoids one DB round trip per request for active users.
+
+interface CacheEntry { cutter: CutterRow; expiresAt: number; }
+const _sessionCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+function getCached(token: string): CutterRow | null {
+  const entry = _sessionCache.get(token);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { _sessionCache.delete(token); return null; }
+  return entry.cutter;
+}
+
+function setCache(token: string, cutter: CutterRow) {
+  // Evict old entries if cache grows too large
+  if (_sessionCache.size > 200) {
+    const now = Date.now();
+    for (const [k, v] of _sessionCache) {
+      if (now > v.expiresAt) _sessionCache.delete(k);
+    }
+  }
+  _sessionCache.set(token, { cutter, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+export function invalidateSessionCache(token: string) {
+  _sessionCache.delete(token);
+}
+
 // ─── Session Management ────────────────────────────────────────────
 
 export async function getSessionFromCookie(
   cookieValue: string | undefined
 ): Promise<CutterRow | null> {
   if (!cookieValue) return null;
+
+  // Try cache first — skips DB round trip on warm functions
+  const cached = getCached(cookieValue);
+  if (cached) return cached;
 
   const db = await ensureDb();
   const result = await db.execute({
@@ -93,7 +127,9 @@ export async function getSessionFromCookie(
     args: [cookieValue],
   });
 
-  return (result.rows[0] as unknown as CutterRow) ?? null;
+  const cutter = (result.rows[0] as unknown as CutterRow) ?? null;
+  if (cutter) setCache(cookieValue, cutter);
+  return cutter;
 }
 
 export function createSessionCookie(sessionToken: string): string {

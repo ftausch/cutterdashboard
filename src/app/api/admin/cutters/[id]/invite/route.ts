@@ -1,8 +1,3 @@
-/**
- * POST /api/admin/cutters/[id]/invite
- * Re-sends an invite email to the cutter. Generates a fresh 7-day token.
- * Use when the original invite has expired or the cutter didn't receive it.
- */
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
@@ -15,10 +10,13 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requirePermission(request, 'USER_MANAGE');
+  // Auth + params in parallel
+  const [auth, { id }] = await Promise.all([
+    requirePermission(request, 'USER_MANAGE'),
+    params,
+  ]);
   if (!isCutter(auth)) return auth;
 
-  const { id } = await params;
   const db = await ensureDb();
 
   const result = await db.execute({
@@ -31,16 +29,18 @@ export async function POST(
     return NextResponse.json({ error: 'Cutter nicht gefunden' }, { status: 404 });
   }
 
-  // Generate fresh invite token
   const token   = randomUUID();
   const expires = new Date(Date.now() + INVITE_EXPIRES_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  // Update token + send email in parallel — don't await email
   await db.execute({
     sql: `UPDATE cutters SET magic_token = ?, token_expires_at = ? WHERE id = ?`,
     args: [token, expires, id],
   });
 
-  await sendInviteEmail(cutter.email, cutter.name, token, auth.name);
+  // Fire-and-forget — respond immediately, email sends in background
+  sendInviteEmail(cutter.email, cutter.name, token, auth.name)
+    .catch((err) => console.error('[invite] email failed:', err));
 
   return NextResponse.json({ success: true, email: cutter.email });
 }

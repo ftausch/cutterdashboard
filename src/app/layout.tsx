@@ -22,7 +22,7 @@ export default function RootLayout({
       >
         {children}
         <div className="fixed bottom-3 right-3 z-50 rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm select-none">
-          v1.0.1 — Test-Rechnungen
+          v1.1.0 — Alerts
         </div>
       </body>
     </html>

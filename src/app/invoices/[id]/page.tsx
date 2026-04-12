@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
-import { ArrowLeft, FileText, ExternalLink } from "lucide-react";
+import { ArrowLeft, FileText, Download, ExternalLink } from "lucide-react";
 
 interface Invoice {
   id: string;
@@ -120,13 +120,21 @@ export default function InvoiceDetailPage() {
               {status.label}
             </span>
             <a
-              href={`/api/invoices/${invoice.id}/pdf`}
+              href={`/api/invoices/${invoice.id}/pdf?inline=1`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             >
               <FileText className="h-4 w-4" />
-              PDF anzeigen
+              Anzeigen
+            </a>
+            <a
+              href={`/api/invoices/${invoice.id}/pdf`}
+              download
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              <Download className="h-4 w-4" />
+              PDF herunterladen
             </a>
           </div>
         </div>

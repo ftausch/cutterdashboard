@@ -1,7 +1,21 @@
+/**
+ * GET /api/invoices/[id]/pdf
+ * Returns a binary PDF of the invoice — direct download.
+ *
+ * Query params:
+ *   ?inline=1   → Content-Disposition: inline  (view in browser)
+ *   (default)   → Content-Disposition: attachment (download)
+ */
 import { NextRequest, NextResponse } from 'next/server';
+import { renderToBuffer } from '@react-pdf/renderer';
 import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
-import { generateInvoiceHtml, type InvoiceTemplateData } from '@/lib/cutter/invoice-template';
+import { InvoicePDF } from '@/lib/cutter/invoice-pdf';
+import type { InvoiceTemplateData } from '@/lib/cutter/invoice-template';
+import React from 'react';
+
+// Force Node.js runtime — @react-pdf/renderer needs it
+export const runtime = 'nodejs';
 
 interface InvoiceRow {
   id: string;
@@ -58,45 +72,61 @@ export async function GET(
   });
   const items = itemsResult.rows as unknown as ItemRow[];
 
-  const sender = JSON.parse(invoice.sender_company || '{}');
+  const sender    = JSON.parse(invoice.sender_company    || '{}');
   const recipient = JSON.parse(invoice.recipient_company || '{}');
 
   const templateData: InvoiceTemplateData = {
     invoiceNumber: invoice.invoice_number,
-    invoiceDate: formatDate(invoice.created_at),
-    periodStart: formatDate(invoice.period_start),
-    periodEnd: formatDate(invoice.period_end),
+    invoiceDate:   formatDate(invoice.created_at),
+    periodStart:   formatDate(invoice.period_start),
+    periodEnd:     formatDate(invoice.period_end),
     sender: {
-      name: sender.name || auth.name,
+      name:    sender.name    || auth.name,
       company: sender.name,
       address: sender.address,
-      taxId: sender.taxId,
-      iban: sender.iban,
+      taxId:   sender.taxId,
+      iban:    sender.iban,
     },
     recipient: {
-      name: recipient.name || '',
+      name:    recipient.name    || '',
       address: recipient.address,
-      taxId: recipient.taxId,
+      taxId:   recipient.taxId,
     },
     items: items.map((item, i) => ({
-      position: i + 1,
-      title: item.video_title,
-      platform: item.platform,
-      url: item.video_url,
-      views: item.views_in_period,
+      position:   i + 1,
+      title:      item.video_title,
+      platform:   item.platform,
+      url:        item.video_url,
+      views:      item.views_in_period,
       ratePerView: invoice.rate_per_view,
-      amount: item.amount,
+      amount:     item.amount,
     })),
-    totalViews: invoice.total_views,
+    totalViews:  invoice.total_views,
     totalAmount: invoice.total_amount,
     ratePerView: invoice.rate_per_view,
   };
 
-  const html = generateInvoiceHtml(templateData);
+  // Render PDF to buffer
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfBuffer = await renderToBuffer(
+    React.createElement(InvoicePDF, { data: templateData }) as any
+  );
 
-  return new NextResponse(html, {
+  const filename = `${invoice.invoice_number}.pdf`;
+  const inline   = request.nextUrl.searchParams.get('inline') === '1';
+  const disposition = inline
+    ? `inline; filename="${filename}"`
+    : `attachment; filename="${filename}"`;
+
+  // Convert Buffer → Uint8Array for NextResponse compatibility
+  const body = new Uint8Array(pdfBuffer);
+
+  return new NextResponse(body, {
     headers: {
-      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Type':        'application/pdf',
+      'Content-Disposition': disposition,
+      'Content-Length':      String(body.byteLength),
+      'Cache-Control':       'private, no-cache',
     },
   });
 }

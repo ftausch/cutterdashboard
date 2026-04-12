@@ -46,7 +46,8 @@ const SECONDARY_NAV: SecondaryItem[] = [
   { href: "/invoices", label: "Rechnungen", icon: Receipt,    match: (p) => p.startsWith("/invoices") },
   { href: "/accounts", label: "Konten",     icon: Link2,      match: (p) => p.startsWith("/accounts") },
   // Ops-gated
-  { href: "/ops",           label: "Ops",       icon: ShieldCheck, match: (p) => p === "/ops", opsOnly: true },
+  { href: "/ops",           label: "Ops",       icon: ShieldCheck, match: (p) => p === "/ops",           opsOnly: true },
+  { href: "/ops/cutters",   label: "Cutter",    icon: User,        match: (p) => p.startsWith("/ops/cutters"),   opsOnly: true },
   { href: "/ops/clips",     label: "Clips",     icon: List,        match: (p) => p.startsWith("/ops/clips"),     opsOnly: true },
   { href: "/ops/alerts",    label: "Alerts",    icon: Bell,        match: (p) => p.startsWith("/ops/alerts"),    opsOnly: true },
   { href: "/ops/analytics", label: "Analytics", icon: BarChart2,   match: (p) => p.startsWith("/ops/analytics"), opsOnly: true },

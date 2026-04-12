@@ -1,21 +1,16 @@
 /**
  * GET /api/invoices/[id]/pdf
- * Returns a binary PDF of the invoice — direct download.
+ * Returns a print-ready HTML page for the invoice.
+ * The browser handles PDF conversion via Cmd+P / window.print().
  *
- * Query params:
- *   ?inline=1   → Content-Disposition: inline  (view in browser)
- *   (default)   → Content-Disposition: attachment (download)
+ * This approach is used instead of server-side PDF rendering because
+ * heavy PDF libraries (e.g. @react-pdf/renderer) cause very slow cold
+ * starts on Vercel serverless functions.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { renderToBuffer } from '@react-pdf/renderer';
 import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
-import { InvoicePDF } from '@/lib/cutter/invoice-pdf';
-import type { InvoiceTemplateData } from '@/lib/cutter/invoice-template';
-import React from 'react';
-
-// Force Node.js runtime — @react-pdf/renderer needs it
-export const runtime = 'nodejs';
+import { generateInvoiceHtml, type InvoiceTemplateData } from '@/lib/cutter/invoice-template';
 
 interface InvoiceRow {
   id: string;
@@ -74,6 +69,7 @@ export async function GET(
 
   const sender    = JSON.parse(invoice.sender_company    || '{}');
   const recipient = JSON.parse(invoice.recipient_company || '{}');
+  const isTest    = invoice.invoice_number.startsWith('TEST-');
 
   const templateData: InvoiceTemplateData = {
     invoiceNumber: invoice.invoice_number,
@@ -93,40 +89,63 @@ export async function GET(
       taxId:   recipient.taxId,
     },
     items: items.map((item, i) => ({
-      position:   i + 1,
-      title:      item.video_title,
-      platform:   item.platform,
-      url:        item.video_url,
-      views:      item.views_in_period,
+      position:    i + 1,
+      title:       item.video_title,
+      platform:    item.platform,
+      url:         item.video_url,
+      views:       item.views_in_period,
       ratePerView: invoice.rate_per_view,
-      amount:     item.amount,
+      amount:      item.amount,
     })),
     totalViews:  invoice.total_views,
     totalAmount: invoice.total_amount,
     ratePerView: invoice.rate_per_view,
   };
 
-  // Render PDF to buffer
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfBuffer = await renderToBuffer(
-    React.createElement(InvoicePDF, { data: templateData }) as any
-  );
+  let html = generateInvoiceHtml(templateData);
 
-  const filename = `${invoice.invoice_number}.pdf`;
-  const inline   = request.nextUrl.searchParams.get('inline') === '1';
-  const disposition = inline
-    ? `inline; filename="${filename}"`
-    : `attachment; filename="${filename}"`;
+  // Inject test watermark via CSS into the HTML if this is a test invoice
+  if (isTest) {
+    const testStyles = `
+      <style>
+        body::before {
+          content: 'TESTRECHNUNG';
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%) rotate(-45deg);
+          font-size: 96px;
+          font-weight: 900;
+          color: rgba(255, 0, 0, 0.07);
+          pointer-events: none;
+          z-index: 9999;
+          white-space: nowrap;
+        }
+        .test-banner {
+          background: #fff3cd;
+          border: 1px solid #ffc107;
+          border-radius: 6px;
+          padding: 12px 16px;
+          margin-bottom: 20px;
+          font-size: 13px;
+          color: #856404;
+        }
+        .test-banner strong { display: block; margin-bottom: 4px; }
+        @media print { body::before { color: rgba(255,0,0,0.06); } }
+      </style>`;
 
-  // Convert Buffer → Uint8Array for NextResponse compatibility
-  const body = new Uint8Array(pdfBuffer);
+    const testBanner = `
+      <div class="test-banner no-print" style="margin: 16px; border-radius:6px; background:#fff3cd; border:1px solid #ffc107; padding:12px 16px; color:#856404;">
+        <strong>⚠ TESTRECHNUNG — NICHT ZAHLUNGSPFLICHTIG</strong>
+        Dieses Dokument wurde zu Testzwecken generiert. Views und Beträge sind fiktiv (10.000 Views/Video). Echte Daten wurden nicht verändert.
+      </div>`;
 
-  return new NextResponse(body, {
-    headers: {
-      'Content-Type':        'application/pdf',
-      'Content-Disposition': disposition,
-      'Content-Length':      String(body.byteLength),
-      'Cache-Control':       'private, no-cache',
-    },
+    html = html
+      .replace('</head>', testStyles + '</head>')
+      .replace('<div class="no-print"', testBanner + '\n  <div class="no-print"');
+  }
+
+  return new NextResponse(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }

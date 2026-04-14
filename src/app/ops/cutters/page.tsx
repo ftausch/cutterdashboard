@@ -200,7 +200,8 @@ export default function OpsCuttersPage() {
   function load() {
     fetch("/api/admin/cutters")
       .then((r) => {
-        if (r.status === 401 || r.status === 403) { router.push("/login"); return null; }
+        if (r.status === 401) { router.push("/login?redirect=/ops/cutters"); return null; }
+        if (r.status === 403) { router.push("/login"); return null; }
         return r.json();
       })
       .then((d) => {

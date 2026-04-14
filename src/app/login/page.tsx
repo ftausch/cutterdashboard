@@ -7,6 +7,7 @@ import { Scissors, Mail, ArrowRight, CheckCircle, AlertCircle } from "lucide-rea
 function LoginForm() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
+  const redirect = searchParams.get("redirect");
 
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
@@ -21,7 +22,7 @@ function LoginForm() {
       const res = await fetch("/api/auth/send-magic-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), redirect }),
       });
       if (res.ok) {
         setStatus("sent");

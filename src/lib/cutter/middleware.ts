@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifySession, getSessionCookie } from './jwt';
+import { verifySession, getSessionCookie, clearSessionCookie } from './jwt';
 import { can, type Permission, type Role } from '@/lib/permissions';
 import type { CutterRow } from './auth';
 
 /**
  * Authenticate from JWT cookie — zero DB calls.
  * Returns a CutterRow-compatible object or a 401 response.
+ * If the cookie exists but is invalid (e.g. old pre-JWT UUID token),
+ * the 401 response also clears the stale cookie so the browser doesn't
+ * keep sending it on every request.
  */
 export async function requireCutterAuth(
   request: NextRequest
@@ -14,7 +17,10 @@ export async function requireCutterAuth(
   const session = await verifySession(token);
 
   if (!session || !session.is_active) {
-    return NextResponse.json({ error: 'Nicht autorisiert' }, { status: 401 });
+    const res = NextResponse.json({ error: 'Nicht autorisiert' }, { status: 401 });
+    // Clear any stale / pre-JWT cookie so the browser stops sending it
+    if (token) res.headers.set('Set-Cookie', clearSessionCookie());
+    return res;
   }
 
   // Return session payload shaped as CutterRow

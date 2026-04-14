@@ -18,7 +18,11 @@ export async function GET(request: NextRequest) {
   // Issue a JWT — no more DB session table needed
   const jwt = await signSession(result.cutter);
 
-  const response = NextResponse.redirect(new URL('/dashboard', request.url));
+  // Honour redirect param if present and safe (relative paths only)
+  const redirectParam = request.nextUrl.searchParams.get('redirect');
+  const destination = redirectParam?.startsWith('/') ? redirectParam : '/dashboard';
+
+  const response = NextResponse.redirect(new URL(destination, request.url));
   response.headers.set('Set-Cookie', makeSessionCookie(jwt));
   return response;
 }

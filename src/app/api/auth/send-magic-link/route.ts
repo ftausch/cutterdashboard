@@ -4,7 +4,7 @@ import { sendMagicLinkEmail } from '@/lib/cutter/email';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json();
+    const { email, redirect } = await request.json();
 
     if (!email || typeof email !== 'string') {
       return NextResponse.json(
@@ -22,7 +22,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await sendMagicLinkEmail(email.trim().toLowerCase(), token);
+    // Only allow relative redirects to prevent open redirect attacks
+    const safeRedirect = typeof redirect === 'string' && redirect.startsWith('/') ? redirect : undefined;
+    await sendMagicLinkEmail(email.trim().toLowerCase(), token, safeRedirect);
 
     return NextResponse.json({ success: true });
   } catch (err) {

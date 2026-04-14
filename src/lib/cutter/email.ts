@@ -61,12 +61,13 @@ export async function sendInviteEmail(email: string, name: string, token: string
   });
 }
 
-export async function sendMagicLinkEmail(email: string, token: string) {
+export async function sendMagicLinkEmail(email: string, token: string, redirect?: string) {
   const baseUrl =
     process.env.CUTTER_BASE_URL ||
     process.env.NEXT_PUBLIC_BASE_URL ||
     'http://localhost:3000';
-  const link = `${baseUrl}/api/auth/verify?token=${token}`;
+  const redirectParam = redirect ? `&redirect=${encodeURIComponent(redirect)}` : '';
+  const link = `${baseUrl}/api/auth/verify?token=${token}${redirectParam}`;
 
   // Always log for debugging
   console.log(`[Magic Link] ${email} → ${link}`);

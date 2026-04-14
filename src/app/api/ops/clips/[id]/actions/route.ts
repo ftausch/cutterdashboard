@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getSessionFromCookie } from '@/lib/cutter/auth';
-import { can, type Role } from '@/lib/permissions';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { randomUUID } from 'crypto';
 
 async function dbQuery(sql: string, args: unknown[] = []) {
@@ -52,12 +50,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const cookieStore = await cookies();
-  const session = await getSessionFromCookie(cookieStore.get('cutter_session')?.value);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!can(session.role as Role, 'OPS_WRITE')) {
-    return NextResponse.json({ error: 'Keine Berechtigung' }, { status: 403 });
-  }
+  const auth = await requirePermission(request, 'OPS_WRITE');
+  if (!isCutter(auth)) return auth;
 
   const { id } = await params;
   const body = await request.json();
@@ -79,7 +73,7 @@ export async function POST(
     case 'mark_reviewed':
       await dbQuery(
         `UPDATE cutter_videos SET reviewed_by = ?, reviewed_at = ? WHERE id = ?`,
-        [session.name, now, id]
+        [auth.name, now, id]
       );
       break;
 
@@ -139,8 +133,8 @@ export async function POST(
      VALUES (?, ?, ?, ?, 'video', ?, ?, ?)`,
     [
       randomUUID(),
-      session.id,
-      session.name,
+      auth.id,
+      auth.name,
       `video.${action}`,
       id,
       JSON.stringify(actionParams),

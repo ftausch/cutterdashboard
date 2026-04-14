@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getSessionFromCookie } from '@/lib/cutter/auth';
-import { can, type Role } from '@/lib/permissions';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 
 async function dbQuery(sql: string, args: unknown[] = []) {
   const url = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
@@ -55,15 +53,11 @@ function floatVal(cell: unknown): number | null {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const cookieStore = await cookies();
-  const session = await getSessionFromCookie(cookieStore.get('cutter_session')?.value);
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!can(session.role as Role, 'OPS_READ')) {
-    return NextResponse.json({ error: 'Keine Berechtigung' }, { status: 403 });
-  }
+  const auth = await requirePermission(request, 'OPS_READ');
+  if (!isCutter(auth)) return auth;
 
   const { id } = await params;
 

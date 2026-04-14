@@ -4,24 +4,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getSessionFromCookie } from '@/lib/cutter/auth';
-import { can, type Role } from '@/lib/permissions';
+import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { runSync, startSyncLog, writeSyncLog } from '@/lib/sync/engine';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  void request;
-  const cookieStore = await cookies();
-  const session = await getSessionFromCookie(
-    cookieStore.get('cutter_session')?.value
-  );
-
-  if (!session || !can(session.role as Role, 'SYSTEM_SETTINGS')) {
-    return NextResponse.json({ error: 'Kein Zugriff' }, { status: 403 });
-  }
+  const auth = await requirePermission(request, 'SYSTEM_SETTINGS');
+  if (!isCutter(auth)) return auth;
 
   const start = Date.now();
   try {
@@ -46,15 +37,8 @@ export async function POST(request: NextRequest) {
 
 // GET — letztes Sync-Ergebnis laden
 export async function GET(request: NextRequest) {
-  void request;
-  const cookieStore = await cookies();
-  const session = await getSessionFromCookie(
-    cookieStore.get('cutter_session')?.value
-  );
-
-  if (!session || !can(session.role as Role, 'SCRAPE_STATUS')) {
-    return NextResponse.json({ error: 'Kein Zugriff' }, { status: 403 });
-  }
+  const auth = await requirePermission(request, 'SCRAPE_STATUS');
+  if (!isCutter(auth)) return auth;
 
   const url = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
   const token = process.env.TURSO_AUTH_TOKEN!;

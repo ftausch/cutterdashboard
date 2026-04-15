@@ -14,7 +14,7 @@
 import { randomUUID } from 'crypto';
 import type { SyncResult, CutterAccount, VideoData } from './types';
 import { resolveYouTubeChannel, fetchYouTubeVideos } from './youtube';
-import { fetchTikTokVideos, isTikTokReady } from './tiktok';
+import { scrapeVideoViews } from '@/lib/cutter/scraper';
 
 // ─── Turso DB client (direct HTTP) ───────────────────────────────────────────
 
@@ -66,7 +66,8 @@ async function loadCutterAccounts(): Promise<CutterAccount[]> {
       ca.account_handle,
       ca.account_url,
       ca.youtube_channel_id,
-      ca.oauth_access_token
+      ca.oauth_access_token,
+      ca.platform_user_id
     FROM cutter_accounts ca
     JOIN cutters c ON c.id = ca.cutter_id
     WHERE c.is_active = 1
@@ -82,6 +83,29 @@ async function loadCutterAccounts(): Promise<CutterAccount[]> {
     accountUrl: (row[5] as { value: string | null }).value,
     youtubeChannelId: (row[6] as { value: string | null }).value,
     oauthAccessToken: (row[7] as { value: string | null }).value,
+    instagramUserId: (row[8] as { value: string | null }).value ?? null,
+  }));
+}
+
+// ─── Fetch existing videos for scraper-based sync ────────────────────────────
+
+async function fetchExistingVideos(
+  cutterId: string,
+  platform: string
+): Promise<Array<{ externalId: string; url: string; title: string; publishedAt: string | null }>> {
+  const result = await dbQuery(
+    `SELECT external_id, url, COALESCE(title, '') as title, published_at
+     FROM cutter_videos
+     WHERE cutter_id = ? AND platform = ?
+     ORDER BY published_at DESC
+     LIMIT 50`,
+    [cutterId, platform]
+  );
+  return result.rows.map((row: unknown[]) => ({
+    externalId: (row[0] as { value: string }).value,
+    url: (row[1] as { value: string }).value,
+    title: (row[2] as { value: string }).value ?? '',
+    publishedAt: (row[3] as { value: string | null }).value,
   }));
 }
 
@@ -194,25 +218,49 @@ export async function runSync(): Promise<SyncResult[]> {
         videos = await fetchYouTubeVideos(uploadsPlaylistId);
 
       } else if (account.platform === 'tiktok') {
-        if (isTikTokReady(account.oauthAccessToken)) {
-          videos = await fetchTikTokVideos(
-            account.oauthAccessToken!,
-            account.accountHandle
-          );
+        const existing = await fetchExistingVideos(account.cutterId, 'tiktok');
+        if (existing.length === 0) {
+          error = 'Keine TikTok-Videos zum Aktualisieren vorhanden';
         } else {
-          error = 'TikTok Business API noch nicht verbunden';
+          for (const v of existing) {
+            const r = await scrapeVideoViews('tiktok', v.externalId, v.url);
+            if (r.views !== null) {
+              videos.push({ externalId: v.externalId, url: v.url, title: r.title ?? v.title, viewCount: r.views, publishedAt: v.publishedAt, platform: 'tiktok' });
+            }
+            await new Promise(res => setTimeout(res, 300));
+          }
         }
 
       } else if (account.platform === 'instagram') {
-        // Instagram Graph API — requires oauth_access_token
         if (!account.oauthAccessToken) {
-          error = 'Instagram noch nicht verbunden (OAuth fehlt)';
+          error = 'Instagram nicht verbunden (OAuth fehlt)';
         } else {
-          error = 'Instagram Sync folgt in nächstem Sprint';
+          const existing = await fetchExistingVideos(account.cutterId, 'instagram');
+          for (const v of existing) {
+            const r = await scrapeVideoViews('instagram', v.externalId, v.url, account.oauthAccessToken, account.instagramUserId ?? undefined);
+            if (r.views !== null) {
+              videos.push({ externalId: v.externalId, url: v.url, title: r.title ?? v.title, viewCount: r.views, publishedAt: v.publishedAt, platform: 'instagram' });
+            }
+            await new Promise(res => setTimeout(res, 300));
+          }
+          if (videos.length === 0 && existing.length === 0) {
+            error = 'Keine Instagram-Videos zum Aktualisieren vorhanden';
+          }
         }
 
       } else if (account.platform === 'facebook') {
-        error = 'Facebook Sync folgt in nächstem Sprint';
+        const existing = await fetchExistingVideos(account.cutterId, 'facebook');
+        if (existing.length === 0) {
+          error = 'Keine Facebook-Videos zum Aktualisieren vorhanden';
+        } else {
+          for (const v of existing) {
+            const r = await scrapeVideoViews('facebook', v.externalId, v.url);
+            if (r.views !== null) {
+              videos.push({ externalId: v.externalId, url: v.url, title: r.title ?? v.title, viewCount: r.views, publishedAt: v.publishedAt, platform: 'facebook' });
+            }
+            await new Promise(res => setTimeout(res, 300));
+          }
+        }
       }
 
     } catch (e) {

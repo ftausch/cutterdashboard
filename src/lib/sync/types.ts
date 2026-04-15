@@ -30,4 +30,5 @@ export interface CutterAccount {
   accountUrl: string | null;
   youtubeChannelId: string | null;
   oauthAccessToken: string | null;
+  instagramUserId: string | null;
 }

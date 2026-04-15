@@ -72,6 +72,8 @@ export default function CutterAdminPage() {
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRate, setNewRate] = useState("0.01");
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
   const [scrapeStatus, setScrapeStatus] = useState<ScrapeStatus | null>(null);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -119,28 +121,37 @@ export default function CutterAdminPage() {
 
   useEffect(() => { loadAll(); loadSyncLogs(); }, [router]);
 
-  async function handleCreateCutter() {
-    if (!newName.trim() || !newEmail.trim()) return;
+  async function handleCreateCutter(e?: React.FormEvent) {
+    e?.preventDefault();
+    setCreateError("");
+    if (!newName.trim()) { setCreateError("Name erforderlich"); return; }
+    if (!newEmail.trim()) { setCreateError("E-Mail erforderlich"); return; }
 
-    const res = await fetch("/api/admin/cutters", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newName.trim(),
-        email: newEmail.trim(),
-        rate_per_view: parseFloat(newRate) || 0.01,
-      }),
-    });
+    setCreating(true);
+    try {
+      const res = await fetch("/api/admin/cutters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName.trim(),
+          email: newEmail.trim().toLowerCase(),
+          rate_per_view: parseFloat(newRate.replace(",", ".")) || 0.01,
+        }),
+      });
 
-    if (res.ok) {
-      setShowNew(false);
-      setNewName("");
-      setNewEmail("");
-      setNewRate("0.01");
-      loadAll();
-    } else {
-      const data = await res.json();
-      alert(data.error || "Fehler");
+      if (res.ok) {
+        setShowNew(false);
+        setNewName("");
+        setNewEmail("");
+        setNewRate("0.01");
+        setCreateError("");
+        loadAll();
+      } else {
+        const data = await res.json();
+        setCreateError(data.error || "Fehler beim Anlegen");
+      }
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -185,37 +196,44 @@ export default function CutterAdminPage() {
           </div>
 
           {showNew && (
-            <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+            <form onSubmit={handleCreateCutter} className="mb-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
               <div className="grid gap-3 sm:grid-cols-4">
                 <input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
+                  onBlur={(e) => setNewName(e.target.value)}
                   placeholder="Name"
+                  autoComplete="off"
                   className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
                 />
                 <input
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
+                  onBlur={(e) => setNewEmail(e.target.value)}
                   placeholder="E-Mail"
                   type="email"
+                  autoComplete="off"
                   className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
                 />
                 <input
                   value={newRate}
                   onChange={(e) => setNewRate(e.target.value)}
-                  placeholder="Rate/View"
-                  type="number"
-                  step="0.001"
+                  placeholder="Rate/View (z.B. 0.01)"
+                  autoComplete="off"
                   className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
                 />
                 <button
-                  onClick={handleCreateCutter}
-                  className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
+                  type="submit"
+                  disabled={creating}
+                  className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 >
-                  Anlegen
+                  {creating ? "..." : "Anlegen"}
                 </button>
               </div>
-            </div>
+              {createError && (
+                <p className="mt-2 text-xs text-red-400">{createError}</p>
+              )}
+            </form>
           )}
 
           <div className="rounded-xl border border-border bg-card">

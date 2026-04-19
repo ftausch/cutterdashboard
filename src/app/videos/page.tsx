@@ -179,13 +179,17 @@ function ClaimedViewsCell({ video, onUpdate, mobile }: { video: VideoRow; onUpda
   const [value, setValue] = useState(video.claimed_views?.toString() ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function save() {
     setSaving(true);
-    setError(false);
+    setErrorMsg(null);
     const parsed = value.trim() === "" ? null : parseInt(value, 10);
-    if (parsed !== null && (isNaN(parsed) || parsed < 0)) { setSaving(false); setError(true); return; }
+    if (parsed !== null && (isNaN(parsed) || parsed < 0)) {
+      setSaving(false);
+      setErrorMsg("Bitte eine gültige Zahl eingeben.");
+      return;
+    }
     const res = await fetch(`/api/videos/${video.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -198,7 +202,8 @@ function ClaimedViewsCell({ video, onUpdate, mobile }: { video: VideoRow; onUpda
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } else {
-      setError(true);
+      const data = await res.json().catch(() => ({}));
+      setErrorMsg(data.error || `Fehler (${res.status})`);
     }
   }
 
@@ -210,10 +215,10 @@ function ClaimedViewsCell({ video, onUpdate, mobile }: { video: VideoRow; onUpda
             type="number"
             inputMode="numeric"
             value={value}
-            onChange={(e) => { setValue(e.target.value); setSaved(false); setError(false); }}
+            onChange={(e) => { setValue(e.target.value); setSaved(false); setErrorMsg(null); }}
             placeholder="Views eingeben…"
             className={`flex-1 h-11 rounded-xl border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/20 bg-background transition-colors ${
-              error ? "border-red-500 focus:border-red-500" : saved ? "border-emerald-500 focus:border-emerald-500" : "border-border focus:border-primary"
+              errorMsg ? "border-red-500 focus:border-red-500" : saved ? "border-emerald-500 focus:border-emerald-500" : "border-border focus:border-primary"
             }`}
           />
           <button
@@ -227,7 +232,7 @@ function ClaimedViewsCell({ video, onUpdate, mobile }: { video: VideoRow; onUpda
           </button>
         </div>
         {saved && <p className="text-xs text-emerald-400 font-medium">✓ Gespeichert!</p>}
-        {error && <p className="text-xs text-red-400">Fehler — bitte nochmal versuchen.</p>}
+        {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}
       </div>
     );
   }

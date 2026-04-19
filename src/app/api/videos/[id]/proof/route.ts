@@ -41,23 +41,30 @@ export async function POST(
     return NextResponse.json({ error: 'Keine Datei hochgeladen' }, { status: 400 });
   }
 
-  // Validate type and size
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    return NextResponse.json({ error: 'Nur JPEG, PNG oder WebP erlaubt' }, { status: 400 });
+  // Validate size
+  if (file.size > 20 * 1024 * 1024) {
+    return NextResponse.json({ error: 'Datei darf maximal 20 MB groß sein' }, { status: 400 });
   }
-  if (file.size > 10 * 1024 * 1024) {
-    return NextResponse.json({ error: 'Datei darf maximal 10 MB groß sein' }, { status: 400 });
+
+  // Accept all image types — iPhone sends HEIC/HEIF, some browsers send empty type
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/gif'];
+  const fileType = file.type || 'image/jpeg'; // fallback if browser sends empty type
+  if (fileType && !fileType.startsWith('image/')) {
+    return NextResponse.json({ error: 'Nur Bilder erlaubt (JPEG, PNG, HEIC, WebP)' }, { status: 400 });
   }
 
   const extMap: Record<string, string> = {
     'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
     'image/png': 'png',
     'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'image/gif': 'gif',
   };
-  const ext = extMap[file.type];
+  const ext = extMap[fileType] ?? 'jpg';
 
-  const blob = await put(`proofs/${videoId}/${Date.now()}.${ext}`, file, { access: 'public' });
+  const blob = await put(`proofs/${videoId}/${Date.now()}.${ext}`, file, { access: 'public', contentType: fileType });
 
   await db.execute({
     sql: `UPDATE cutter_videos

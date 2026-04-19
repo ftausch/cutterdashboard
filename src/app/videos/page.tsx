@@ -275,26 +275,28 @@ function ProofCell({ video, onReload, mobile }: { video: VideoRow; onReload: () 
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
-  const [uploadError, setUploadError] = useState(false);
+  const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
     setUploadDone(false);
-    setUploadError(false);
+    setUploadErrorMsg(null);
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch(`/api/videos/${video.id}/proof`, { method: "POST", body: fd });
     setUploading(false);
     if (res.ok) {
       setUploadDone(true);
-      setTimeout(() => setUploadDone(false), 4000);
+      onReload();
+      setTimeout(() => setUploadDone(false), 5000);
     } else {
-      setUploadError(true);
-      setTimeout(() => setUploadError(false), 4000);
+      const data = await res.json().catch(() => ({}));
+      const msg = data.error || `Fehler ${res.status}`;
+      setUploadErrorMsg(msg);
+      setTimeout(() => setUploadErrorMsg(null), 8000);
     }
-    onReload();
     e.target.value = "";
   }
 
@@ -310,7 +312,7 @@ function ProofCell({ video, onReload, mobile }: { video: VideoRow; onReload: () 
   const uploadClass = mobile
     ? `flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed py-4 text-sm transition-all active:scale-[0.98] ${
         uploadDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" :
-        uploadError ? "border-red-500 bg-red-500/10 text-red-400" :
+        uploadErrorMsg ? "border-red-500 bg-red-500/10 text-red-400" :
         "border-border bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground hover:bg-accent/30"
       }`
     : "flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground hover:border-primary/30 hover:text-foreground hover:bg-accent transition-all";
@@ -328,12 +330,12 @@ function ProofCell({ video, onReload, mobile }: { video: VideoRow; onReload: () 
           {mobile
             ? uploading ? "Wird hochgeladen…"
               : uploadDone ? "✓ Screenshot erfolgreich hochgeladen!"
-              : uploadError ? "Fehler — nochmal antippen"
+              : uploadErrorMsg ? "Fehler — nochmal antippen"
               : "Screenshot auswählen / Foto aufnehmen"
             : "Hochladen"}
           <input type="file" accept="image/jpeg,image/png,image/webp,image/*" className="sr-only" onChange={handleFileChange} disabled={uploading} />
         </label>
-        {mobile && uploadError && <p className="text-xs text-red-400">Upload fehlgeschlagen — bitte nochmal versuchen.</p>}
+        {mobile && uploadErrorMsg && <p className="text-xs text-red-400 break-words">Fehler: {uploadErrorMsg}</p>}
       </div>
     );
   }

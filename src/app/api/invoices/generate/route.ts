@@ -60,8 +60,17 @@ export async function POST(request: NextRequest) {
   // ── Process results ────────────────────────────────────────────
   const videos = videosResult.rows as unknown as VideoRow[];
 
+  const DUMMY_VIDEO: VideoRow = {
+    id: 'test-dummy',
+    platform: 'youtube',
+    url: 'https://youtube.com/watch?v=test',
+    title: 'Test Video',
+    current_views: TEST_VIEWS_PER_VIDEO,
+    views_at_last_invoice: 0,
+  };
+
   const billableItems = isTest
-    ? videos.map((v) => ({
+    ? (videos.length > 0 ? videos : [DUMMY_VIDEO]).map((v) => ({
         video: v,
         deltaViews: TEST_VIEWS_PER_VIDEO,
         amount: TEST_VIEWS_PER_VIDEO * auth.rate_per_view,

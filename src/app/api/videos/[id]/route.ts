@@ -3,6 +3,78 @@ import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { calculateDiscrepancy, type VerificationStatus } from '@/lib/verification/discrepancy';
 
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireCutterAuth(request);
+  if (!isCutter(auth)) return auth;
+
+  const { id } = await params;
+  const db = await ensureDb();
+
+  const result = await db.execute({
+    sql: `SELECT
+        v.id, v.platform, v.external_id, v.url, v.title,
+        v.account_handle, v.current_views, v.claimed_views,
+        v.views_at_last_invoice, v.verification_status, v.verification_source,
+        v.discrepancy_status, v.discrepancy_percent,
+        v.proof_url, v.proof_status, v.proof_cutter_note,
+        v.proof_rejection_reason, v.proof_reviewer_name, v.proof_reviewed_at,
+        v.proof_uploaded_at, v.proof_requested_at,
+        v.episode_id, v.published_at, v.last_scraped_at, v.created_at,
+        v.is_flagged, v.flag_reason,
+        e.title as episode_title
+      FROM cutter_videos v
+      LEFT JOIN episodes e ON v.episode_id = e.id
+      WHERE v.id = ? AND v.cutter_id = ?`,
+    args: [id, auth.id],
+  });
+
+  if (!result.rows[0]) {
+    return NextResponse.json({ error: 'Video nicht gefunden' }, { status: 404 });
+  }
+
+  const r = result.rows[0] as Record<string, unknown>;
+  const currentViews   = (r.current_views   as number) ?? 0;
+  const lastInvoice    = (r.views_at_last_invoice as number) ?? 0;
+  const unbilledViews  = Math.max(0, currentViews - lastInvoice);
+
+  return NextResponse.json({
+    video: {
+      id:                   r.id,
+      platform:             r.platform,
+      external_id:          r.external_id,
+      url:                  r.url,
+      title:                r.title,
+      account_handle:       r.account_handle,
+      current_views:        currentViews,
+      claimed_views:        r.claimed_views,
+      views_at_last_invoice: lastInvoice,
+      unbilled_views:       unbilledViews,
+      verification_status:  r.verification_status,
+      verification_source:  r.verification_source,
+      discrepancy_status:   r.discrepancy_status,
+      discrepancy_percent:  r.discrepancy_percent,
+      proof_url:            r.proof_url,
+      proof_status:         r.proof_status,
+      proof_cutter_note:    r.proof_cutter_note,
+      proof_rejection_reason: r.proof_rejection_reason,
+      proof_reviewer_name:  r.proof_reviewer_name,
+      proof_reviewed_at:    r.proof_reviewed_at,
+      proof_uploaded_at:    r.proof_uploaded_at,
+      proof_requested_at:   r.proof_requested_at,
+      episode_id:           r.episode_id,
+      episode_title:        r.episode_title,
+      published_at:         r.published_at,
+      last_scraped_at:      r.last_scraped_at,
+      created_at:           r.created_at,
+      is_flagged:           r.is_flagged,
+      flag_reason:          r.flag_reason,
+    },
+  });
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

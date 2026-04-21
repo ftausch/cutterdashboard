@@ -132,7 +132,16 @@ export async function PATCH(
 
   const { claimed_views, episode_id } = body as { claimed_views?: number | null; episode_id?: string | null };
 
+  console.log('[PATCH /api/videos/:id] payload received:', {
+    id,
+    claimed_views,
+    claimed_views_type: typeof claimed_views,
+    episode_id,
+    raw_body: JSON.stringify(body),
+  });
+
   if (claimed_views !== undefined && claimed_views !== null && (typeof claimed_views !== 'number' || claimed_views < 0)) {
+    console.warn('[PATCH /api/videos/:id] validation failed:', { claimed_views, type: typeof claimed_views });
     return NextResponse.json({ error: 'Ungültiger Wert für claimed_views' }, { status: 400 });
   }
 

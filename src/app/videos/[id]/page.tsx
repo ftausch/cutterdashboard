@@ -529,24 +529,40 @@ function ViewsSection({ video, onUpdate }: { video: VideoDetail; onUpdate: (clai
 
   async function save() {
     setErr(null);
-    const parsed = value.trim() === "" ? null : parseInt(value, 10);
+    const rawInput = value.trim();
+    const parsed = rawInput === "" ? null : parseInt(rawInput, 10);
+
+    console.log("[ViewsSection.save] raw input:", JSON.stringify(rawInput));
+    console.log("[ViewsSection.save] parsed value:", parsed, "(type:", typeof parsed, ")");
+
     if (parsed !== null && (isNaN(parsed) || parsed < 0)) {
       setErr("Bitte eine gültige Zahl eingeben.");
       return;
     }
+
+    const payload = { claimed_views: parsed };
+    console.log("[ViewsSection.save] payload to send:", JSON.stringify(payload));
+
     setSaving(true);
     const res = await fetch(`/api/videos/${video.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ claimed_views: parsed }),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
+
+    console.log("[ViewsSection.save] response status:", res.status, res.ok ? "OK" : "ERROR");
+
     if (res.ok) {
       onUpdate(parsed);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } else {
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch((e) => {
+        console.error("[ViewsSection.save] could not parse error response as JSON:", e);
+        return {};
+      });
+      console.error("[ViewsSection.save] server error response:", data);
       setErr(data.error || "Fehler beim Speichern");
     }
   }

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
-import { ensureDb } from '@/lib/db';
+import { ensureDb, type SqlValue } from '@/lib/db';
 import { scrapeVideoViews } from '@/lib/cutter/scraper';
 import {
   resolveVerificationSource,
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
   let failed  = 0;
   const details: Array<{ id: string; platform: string; views: number | null; error?: string }> = [];
 
-  const stmts: Array<{ sql: string; args: unknown[] }> = [];
+  const stmts: Array<{ sql: string; args: SqlValue[] }> = [];
 
   for (const video of videos) {
     const result = await scrapeVideoViews(

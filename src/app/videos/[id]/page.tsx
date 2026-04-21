@@ -161,7 +161,7 @@ function validateFile(file: File): string | null {
     else if (name.endsWith(".pdf")) effectiveType = "application/pdf";
   }
   if (!effectiveType.startsWith("image/") && effectiveType !== "application/pdf") {
-    return `Ungültiger Dateityp („${file.type || file.name.split(".").pop() ?? "?"})". Bitte ein Bild hochladen (JPEG, PNG, WebP).`;
+    return `Ungültiger Dateityp („${(file.type || file.name.split(".").pop()) ?? "?"})". Bitte ein Bild hochladen (JPEG, PNG, WebP).`;
   }
   if (file.size > CLIENT_MAX_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);

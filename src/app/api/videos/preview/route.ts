@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
-import { parseClipUrl } from '@/lib/ingest/parser';
+import { parseClipUrl, type ParseError } from '@/lib/ingest/parser';
 import { ensureDb } from '@/lib/db';
 
 export interface PreviewResponse {
@@ -127,8 +127,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<PreviewRe
   // 1. Parse the URL
   const parsed = parseClipUrl(raw);
   if (!parsed.ok) {
+    const { code, messageDe } = parsed as ParseError;
     return NextResponse.json(
-      { ok: false, code: parsed.code, message: parsed.messageDe },
+      { ok: false, code, message: messageDe },
       { status: 422 }
     );
   }

@@ -15,6 +15,7 @@ export type AuditAction =
   | 'alert_dismiss'
   | 'proof_approve'
   | 'proof_reject'
+  | 'proof_request'
   // clip notes — internal-only notes are silent; cutter-visible adds + all deletes are audited
   | 'note_add'
   | 'note_delete';

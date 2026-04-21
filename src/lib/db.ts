@@ -5,7 +5,7 @@ const TURSO_URL = (process.env.TURSO_DATABASE_URL || '')
   .replace('libsql://', 'https://');
 const TURSO_TOKEN = (process.env.TURSO_AUTH_TOKEN || '').trim();
 
-type SqlValue = string | number | boolean | null;
+export type SqlValue = string | number | boolean | null;
 
 interface TursoRow {
   [key: string]: SqlValue;

@@ -40,6 +40,8 @@ const VALID_ACTIONS = [
   'approve_proof',
   'reject_proof',
   'request_proof',
+  'start_review',
+  'request_reupload',
   'add_note',
   'set_verified',
 ] as const;
@@ -124,6 +126,31 @@ export async function POST(
              proof_requested_at  = ?
          WHERE id = ?`,
         [auth.name, now, id]
+      );
+      break;
+
+    case 'start_review':
+      await dbQuery(
+        `UPDATE cutter_videos
+         SET proof_status = 'proof_under_review'
+         WHERE id = ? AND proof_status = 'proof_submitted'`,
+        [id]
+      );
+      break;
+
+    case 'request_reupload':
+      // Reject the current proof AND request a fresh upload from the cutter.
+      // Uses proof_reupload_requested so the cutter can replace without a
+      // separate delete step.
+      await dbQuery(
+        `UPDATE cutter_videos
+         SET proof_status           = 'proof_reupload_requested',
+             proof_rejection_reason = ?,
+             proof_reviewer_id      = ?,
+             proof_reviewer_name    = ?,
+             proof_reviewed_at      = ?
+         WHERE id = ?`,
+        [actionParams.reason ?? null, auth.id, auth.name, now, id]
       );
       break;
 

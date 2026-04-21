@@ -199,17 +199,39 @@ export async function POST(
   }
 
   // ── 3. One-proof-per-clip enforcement ─────────────────────────
+  // Exception: if the proof was rejected or a reupload was requested, the
+  // cutter can replace the existing file without a manual delete step.
   await ensureProofFilesTable(db);
 
   const existingResult = await db.execute({
-    sql: `SELECT id FROM cutter_proof_files WHERE video_id = ?`,
+    sql: `SELECT id, file_url FROM cutter_proof_files WHERE video_id = ?`,
     args: [videoId],
   });
-  if ((existingResult.rows as unknown[]).length > 0) {
-    return NextResponse.json(
-      { error: 'Für diesen Clip existiert bereits ein Nachweis. Bitte zuerst den vorhandenen Nachweis löschen.' },
-      { status: 409 }
-    );
+  const existingRows = existingResult.rows as unknown[];
+
+  if (existingRows.length > 0) {
+    const canAutoReplace =
+      video.proof_status === 'proof_rejected' ||
+      video.proof_status === 'proof_reupload_requested';
+
+    if (!canAutoReplace) {
+      return NextResponse.json(
+        { error: 'Für diesen Clip existiert bereits ein Nachweis. Bitte zuerst den vorhandenen Nachweis löschen.' },
+        { status: 409 }
+      );
+    }
+
+    // Auto-replace: delete the rejected/stale proof before accepting the new one
+    const oldRow = existingRows[0] as Record<string, { value: string | null }>;
+    const oldFileUrl = (Object.values(oldRow)[1] as { value: string | null })?.value ?? null;
+    const oldId     = (Object.values(oldRow)[0] as { value: string | null })?.value ?? null;
+
+    if (oldFileUrl && isStoragePath(oldFileUrl)) {
+      await deleteProof(oldFileUrl); // non-throwing
+    }
+    if (oldId) {
+      await db.execute({ sql: `DELETE FROM cutter_proof_files WHERE id = ?`, args: [oldId] });
+    }
   }
 
   // ── 4. Parse multipart form data ──────────────────────────────

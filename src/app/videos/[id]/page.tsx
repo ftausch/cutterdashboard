@@ -69,11 +69,12 @@ const DISC_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 const PROOF_STATUS_CONFIG: Record<string, { label: string; cls: string; border: string }> = {
-  proof_submitted:    { label: "Eingereicht",   cls: "text-amber-400",   border: "border-amber-500/20 bg-amber-500/5" },
-  proof_under_review: { label: "In Prüfung",    cls: "text-purple-400",  border: "border-purple-500/20 bg-purple-500/5" },
-  proof_approved:     { label: "✓ Genehmigt",   cls: "text-emerald-400", border: "border-emerald-500/20 bg-emerald-500/5" },
-  proof_rejected:     { label: "✕ Abgelehnt",   cls: "text-red-400",     border: "border-red-500/20 bg-red-500/5" },
-  proof_requested:    { label: "⚠ Angefordert", cls: "text-orange-400",  border: "border-orange-500/20 bg-orange-500/5" },
+  proof_submitted:          { label: "Eingereicht",      cls: "text-amber-400",   border: "border-amber-500/20 bg-amber-500/5" },
+  proof_under_review:       { label: "In Prüfung",       cls: "text-purple-400",  border: "border-purple-500/20 bg-purple-500/5" },
+  proof_approved:           { label: "✓ Genehmigt",      cls: "text-emerald-400", border: "border-emerald-500/20 bg-emerald-500/5" },
+  proof_rejected:           { label: "✕ Abgelehnt",      cls: "text-red-400",     border: "border-red-500/20 bg-red-500/5" },
+  proof_requested:          { label: "⚠ Angefordert",   cls: "text-orange-400",  border: "border-orange-500/20 bg-orange-500/5" },
+  proof_reupload_requested: { label: "↩ Neu einreichen", cls: "text-orange-400",  border: "border-orange-500/20 bg-orange-500/5" },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -289,6 +290,38 @@ function ProofSection({ video, onRefresh }: { video: VideoDetail; onRefresh: () 
           className="max-w-full max-h-[82vh] rounded-2xl object-contain mx-auto block shadow-2xl"
         />
       </div>
+    </div>
+  );
+
+  // ── State: reupload requested (rejected + must replace) ──────
+  if (status === "proof_reupload_requested") return (
+    <div className="space-y-4">
+      {viewerModal}
+      <div className="flex items-start gap-3 rounded-xl border border-orange-500/20 bg-orange-500/5 px-4 py-3">
+        <AlertTriangle className="h-4 w-4 text-orange-400 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-medium text-orange-400">Neuer Nachweis erforderlich</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Das Ops-Team hat deinen Nachweis zurückgewiesen und bittet dich, einen neuen Screenshot hochzuladen.
+          </p>
+          {video.proof_rejection_reason && (
+            <p className="text-xs text-orange-300/80 mt-1.5 italic">„{video.proof_rejection_reason}"</p>
+          )}
+          {video.proof_reviewer_name && (
+            <p className="text-xs text-muted-foreground/60 mt-1">
+              Von {video.proof_reviewer_name} · {formatDateTime(video.proof_reviewed_at)}
+            </p>
+          )}
+        </div>
+      </div>
+      {hasProof && (
+        <ProofImage url={video.proof_url!} onClick={() => setShowViewer(true)} />
+      )}
+      <UploadZone onFile={upload} uploading={uploading} uploadOk={uploadOk} accent />
+      <p className="text-xs text-muted-foreground/60 text-center">
+        Der vorherige Nachweis wird beim Hochladen automatisch ersetzt.
+      </p>
+      {errBanner}
     </div>
   );
 

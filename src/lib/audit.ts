@@ -16,6 +16,8 @@ export type AuditAction =
   | 'proof_approve'
   | 'proof_reject'
   | 'proof_request'
+  | 'proof_start_review'
+  | 'proof_reupload_request'
   // clip notes — internal-only notes are silent; cutter-visible adds + all deletes are audited
   | 'note_add'
   | 'note_delete';

@@ -31,6 +31,7 @@ type ClipStatus = "submitted" | "syncing" | "verified" | "partial" | "needs_proo
 function getClipStatus(v: VideoRow): ClipStatus {
   if (v.is_flagged) return "rejected";
   if (v.proof_status === "proof_submitted" || v.proof_status === "proof_under_review") return "reviewing";
+  if (v.proof_status === "proof_reupload_requested") return "needs_proof";
   if (v.discrepancy_status === "critical_difference" || v.discrepancy_status === "suspicious_difference" || v.proof_status === "proof_requested") {
     if (!v.proof_url || v.proof_status === "proof_requested") return "needs_proof";
   }
@@ -55,7 +56,8 @@ const PROOF_STATUS: Record<string, { label: string; cls: string }> = {
   proof_under_review: { label: "In Prüfung",   cls: "text-purple-400" },
   proof_approved:     { label: "✓ Genehmigt",  cls: "text-emerald-400" },
   proof_rejected:     { label: "✕ Abgelehnt",  cls: "text-red-400" },
-  proof_requested:    { label: "⚠ Angefordert",cls: "text-orange-400" },
+  proof_requested:          { label: "⚠ Angefordert",   cls: "text-orange-400" },
+  proof_reupload_requested: { label: "↩ Neu einreichen", cls: "text-orange-400" },
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -92,7 +94,7 @@ function formatRelativeTime(iso: string | null): string {
 
 function getRowAccent(v: VideoRow): string {
   if (v.is_flagged || v.discrepancy_status === "critical_difference" || v.proof_status === "proof_rejected") return "border-l-2 border-l-red-500/60";
-  if (v.discrepancy_status === "suspicious_difference" || v.proof_status === "proof_requested") return "border-l-2 border-l-orange-500/60";
+  if (v.discrepancy_status === "suspicious_difference" || v.proof_status === "proof_requested" || v.proof_status === "proof_reupload_requested") return "border-l-2 border-l-orange-500/60";
   if (v.proof_status === "proof_submitted" || v.proof_status === "proof_under_review") return "border-l-2 border-l-purple-500/40";
   return "border-l-2 border-l-transparent";
 }

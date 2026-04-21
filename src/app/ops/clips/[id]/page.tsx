@@ -102,27 +102,33 @@ const DISC_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 const PROOF_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
-  proof_submitted:     { label: "⏳ Zur Prüfung", cls: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" },
-  proof_under_review:  { label: "🔍 In Prüfung", cls: "bg-purple-500/10 text-purple-400 border border-purple-500/20" },
-  proof_approved:      { label: "✓ Genehmigt",   cls: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" },
-  proof_rejected:      { label: "✕ Abgelehnt",   cls: "bg-red-500/10 text-red-400 border border-red-500/20" },
-  proof_requested:     { label: "⚠ Angefordert", cls: "bg-orange-500/10 text-orange-400 border border-orange-500/20" },
-  no_proof_needed:     { label: "—",              cls: "bg-muted/50 text-muted-foreground border-border" },
+  proof_submitted:          { label: "⏳ Zur Prüfung",       cls: "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" },
+  proof_under_review:       { label: "🔍 In Prüfung",        cls: "bg-purple-500/10 text-purple-400 border border-purple-500/20" },
+  proof_approved:           { label: "✓ Genehmigt",          cls: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" },
+  proof_rejected:           { label: "✕ Abgelehnt",          cls: "bg-red-500/10 text-red-400 border border-red-500/20" },
+  proof_requested:          { label: "⚠ Angefordert",        cls: "bg-orange-500/10 text-orange-400 border border-orange-500/20" },
+  proof_reupload_requested: { label: "↩ Neu einreichen",     cls: "bg-orange-500/10 text-orange-400 border border-orange-500/20" },
+  no_proof_needed:          { label: "—",                    cls: "bg-muted/50 text-muted-foreground border-border" },
 };
 
 const ACTION_LABELS: Record<string, string> = {
-  "video.mark_reviewed": "Als geprüft markiert",
-  "video.flag":          "Geflaggt",
-  "video.unflag":        "Entflaggt",
-  "video.approve_proof": "Beleg genehmigt",
-  "video.reject_proof":  "Beleg abgelehnt",
-  "video.request_proof": "Beleg angefordert",
-  "video.add_note":      "Notiz hinzugefügt",
-  "video.set_verified":  "Als verifiziert gesetzt",
-  "proof_approve":       "Beleg genehmigt",
-  "proof_reject":        "Beleg abgelehnt",
-  "note_add":            "Notiz hinzugefügt",
-  "note_delete":         "Notiz gelöscht",
+  "video.mark_reviewed":      "Als geprüft markiert",
+  "video.flag":               "Geflaggt",
+  "video.unflag":             "Entflaggt",
+  "video.approve_proof":      "Beleg genehmigt",
+  "video.reject_proof":       "Beleg abgelehnt",
+  "video.request_proof":      "Beleg angefordert",
+  "video.start_review":       "Prüfung gestartet",
+  "video.request_reupload":   "Neu einreichen angefordert",
+  "video.add_note":           "Notiz hinzugefügt",
+  "video.set_verified":       "Als verifiziert gesetzt",
+  "video.proof_file_approve": "Datei genehmigt",
+  "video.proof_file_reject":  "Datei abgelehnt",
+  "video.proof_file_reset":   "Datei zurückgesetzt",
+  "proof_approve":            "Beleg genehmigt",
+  "proof_reject":             "Beleg abgelehnt",
+  "note_add":                 "Notiz hinzugefügt",
+  "note_delete":              "Notiz gelöscht",
 };
 
 function formatNum(n: number | null | undefined): string {
@@ -361,6 +367,51 @@ function ProofViewer({
   );
 }
 
+// ── Internal Review Note ──────────────────────────────────────────
+function InternalNoteField({
+  videoId, currentNote, onSaved,
+}: { videoId: string; currentNote: string | null; onSaved: () => void }) {
+  const [note,    setNote]    = useState(currentNote ?? "");
+  const [saving,  setSaving]  = useState(false);
+  const [saved,   setSaved]   = useState(false);
+
+  async function save() {
+    setSaving(true);
+    await fetch(`/api/ops/clips/${videoId}/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add_note", note }),
+    });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    onSaved();
+  }
+
+  return (
+    <div className="border-t border-border pt-4 space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Interne Notiz (nur für Ops)</p>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        placeholder="Interne Anmerkungen zum Nachweis…"
+        rows={2}
+        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary resize-none"
+      />
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground/50">Nicht für den Cutter sichtbar</span>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="rounded-lg bg-muted px-3 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+        >
+          {saving ? "Speichert…" : saved ? "✓ Gespeichert" : "Speichern"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────────
 export default function ClipDetailPage() {
   const router = useRouter();
@@ -422,9 +473,14 @@ export default function ClipDetailPage() {
   const isFlagged = !!video.is_flagged;
   const confidencePct = video.confidence_level ?? 0;
 
-  const proofStatus = video.proof_status;
+  const proofStatus    = video.proof_status;
   const proofStatusCfg = proofStatus ? (PROOF_STATUS_CONFIG[proofStatus] ?? PROOF_STATUS_CONFIG.no_proof_needed) : null;
-  const canApproveReject = proofStatus === "proof_submitted" || proofStatus === "proof_under_review";
+  const canApproveReject  = proofStatus === "proof_submitted" || proofStatus === "proof_under_review";
+  const canStartReview    = proofStatus === "proof_submitted";
+  const canRequestReupload = !!proofFile && proofStatus !== "proof_approved";
+  const proofTimeline = auditTrail.filter(e =>
+    e.action?.includes("proof") || e.action?.includes("proof_file")
+  );
 
   return (
     <>
@@ -554,7 +610,7 @@ export default function ClipDetailPage() {
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm">Nachweis / Screenshots</h2>
-            {proofStatusCfg && (
+            {proofStatusCfg && proofStatus !== "no_proof_needed" && (
               <span className={`rounded px-2 py-0.5 text-xs font-medium ${proofStatusCfg.cls}`}>
                 {proofStatusCfg.label}
               </span>
@@ -578,18 +634,13 @@ export default function ClipDetailPage() {
             </div>
           )}
 
-          {/* Upload metadata */}
-          {video.proof_uploaded_at && (
-            <p className="text-xs text-muted-foreground">
-              Hochgeladen: {formatDateTime(video.proof_uploaded_at)}
-            </p>
-          )}
-
-          {/* Rejection reason */}
-          {proofStatus === "proof_rejected" && video.proof_rejection_reason && (
-            <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-              <p className="text-xs text-red-400 font-medium mb-1">Ablehnungsgrund</p>
-              <p className="text-sm text-red-300">{video.proof_rejection_reason}</p>
+          {/* Rejection / reupload reason */}
+          {(proofStatus === "proof_rejected" || proofStatus === "proof_reupload_requested") && video.proof_rejection_reason && (
+            <div className={`rounded-lg border px-4 py-3 ${proofStatus === "proof_reupload_requested" ? "border-orange-500/20 bg-orange-500/5" : "border-red-500/20 bg-red-500/5"}`}>
+              <p className={`text-xs font-medium mb-1 ${proofStatus === "proof_reupload_requested" ? "text-orange-400" : "text-red-400"}`}>
+                {proofStatus === "proof_reupload_requested" ? "↩ Neu einreichen angefordert" : "Ablehnungsgrund"}
+              </p>
+              <p className="text-sm text-foreground/80">{video.proof_rejection_reason}</p>
               {video.proof_reviewer_name && (
                 <p className="text-xs text-muted-foreground mt-1">
                   Von {video.proof_reviewer_name} · {formatDateTime(video.proof_reviewed_at)}
@@ -607,41 +658,115 @@ export default function ClipDetailPage() {
             </div>
           )}
 
-          {/* Approve / Reject actions — shown when proof is pending or under review */}
-          {canApproveReject && (
+          {/* ── Review actions ────────────────────────────────────── */}
+          {(canApproveReject || canStartReview || canRequestReupload) && (
             <div className="space-y-3 border-t border-border pt-4">
-              {showRejectInput && (
-                <div className="flex gap-2">
-                  <input
-                    value={rejectReason}
-                    onChange={e => setRejectReason(e.target.value)}
-                    placeholder="Ablehnungsgrund…"
-                    className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
-                  />
-                  <button
-                    onClick={() => doAction("reject_proof", { reason: rejectReason })}
-                    disabled={!rejectReason.trim() || actionLoading !== null}
-                    className="h-9 rounded-lg bg-red-500/10 px-4 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-                  >
-                    Ablehnen
-                  </button>
-                </div>
+              <p className="text-xs font-medium text-muted-foreground">Prüfungsaktionen</p>
+
+              {/* Start review */}
+              {canStartReview && (
+                <button
+                  onClick={() => doAction("start_review")}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded-lg border border-purple-500/30 py-2 text-sm text-purple-400 hover:bg-purple-500/10 disabled:opacity-50 transition-colors"
+                >
+                  {actionLoading === "start_review" ? <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto" /> : "🔍 Prüfung starten"}
+                </button>
               )}
-              <div className="flex gap-2">
+
+              {/* Approve */}
+              {canApproveReject && (
                 <button
                   onClick={() => doAction("approve_proof")}
                   disabled={actionLoading !== null}
-                  className="flex-1 rounded-lg bg-emerald-500/10 py-2.5 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                  className="w-full rounded-lg bg-emerald-500/10 py-2.5 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
                 >
                   {actionLoading === "approve_proof" ? <RefreshCw className="h-4 w-4 animate-spin mx-auto" /> : "✓ Beleg genehmigen"}
                 </button>
+              )}
+
+              {/* Request reupload (reject + ask for new proof in one step) */}
+              {canRequestReupload && (
+                <div className="space-y-2">
+                  {showRejectInput && (
+                    <div className="flex gap-2">
+                      <input
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Grund für Rückweisung…"
+                        className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-orange-500/60"
+                      />
+                      <button
+                        onClick={() => {
+                          doAction("request_reupload", { reason: rejectReason });
+                          setShowRejectInput(false);
+                          setRejectReason("");
+                        }}
+                        disabled={!rejectReason.trim() || actionLoading !== null}
+                        className="h-9 rounded-lg bg-orange-500/10 px-4 text-sm text-orange-400 hover:bg-orange-500/20 disabled:opacity-50"
+                      >
+                        Anfordern
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setShowRejectInput(v => !v)}
+                    disabled={actionLoading !== null}
+                    className="w-full rounded-lg border border-orange-500/30 py-2 text-sm text-orange-400 hover:bg-orange-500/10 disabled:opacity-50 transition-colors"
+                  >
+                    ↩ Neu einreichen lassen
+                  </button>
+                </div>
+              )}
+
+              {/* Hard reject (terminal — no reupload) */}
+              {canApproveReject && (
                 <button
-                  onClick={() => setShowRejectInput(v => !v)}
+                  onClick={() => doAction("reject_proof", { reason: rejectReason || "Beleg nicht akzeptiert." })}
                   disabled={actionLoading !== null}
-                  className="flex-1 rounded-lg bg-red-500/10 py-2.5 text-sm font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+                  className="w-full rounded-lg border border-red-500/20 py-2 text-xs text-red-400/70 hover:bg-red-500/5 hover:text-red-400 disabled:opacity-50 transition-colors"
                 >
-                  ✕ Beleg ablehnen
+                  {actionLoading === "reject_proof" ? <RefreshCw className="h-3 w-3 animate-spin mx-auto" /> : "✕ Endgültig ablehnen (kein Reupload)"}
                 </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Internal review note ──────────────────────────────── */}
+          <InternalNoteField
+            videoId={id}
+            currentNote={video.review_notes}
+            onSaved={load}
+          />
+
+          {/* ── Proof timeline ────────────────────────────────────── */}
+          {proofTimeline.length > 0 && (
+            <div className="border-t border-border pt-4 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Verlauf</p>
+              <div className="space-y-1.5">
+                {proofTimeline.map((entry, i) => (
+                  <div key={entry.id ?? i} className="flex items-start gap-2 text-xs">
+                    <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-foreground/80">
+                        {ACTION_LABELS[entry.action ?? ""] ?? entry.action}
+                      </span>
+                      {entry.actor_name && (
+                        <span className="text-muted-foreground"> · {entry.actor_name}</span>
+                      )}
+                      {(() => {
+                        try {
+                          const meta = entry.meta ? JSON.parse(entry.meta) : null;
+                          const note = meta?.reason ?? meta?.review_note ?? null;
+                          return note ? <span className="text-muted-foreground/70"> — „{note}"</span> : null;
+                        } catch { return null; }
+                      })()}
+                    </div>
+                    <span className="text-muted-foreground/50 shrink-0 whitespace-nowrap">
+                      {formatDateTime(entry.created_at)}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

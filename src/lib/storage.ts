@@ -56,41 +56,10 @@ export class StorageUploadError extends Error {
   }
 }
 
-// ── Bucket bootstrap (idempotent) ─────────────────────────────────
-
-/**
- * Ensures the proofs bucket exists. Creates it if missing.
- * Runs at most once per process lifetime.
- */
-let _bucketReady = false;
-export async function ensureBucket(): Promise<void> {
-  if (_bucketReady) return;
-
-  const supabase = getClient();
-
-  // Check if bucket already exists
-  const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
-  if (listErr) {
-    console.error('[storage] listBuckets failed:', listErr.message);
-    // Non-fatal — the bucket might still exist
-  }
-
-  const exists = buckets?.some((b) => b.name === BUCKET);
-  if (!exists) {
-    const { error: createErr } = await supabase.storage.createBucket(BUCKET, {
-      public: false,          // private — access only via signed URLs
-      fileSizeLimit: 1024 * 1024 * 10, // 10 MB hard cap
-      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-    });
-    if (createErr && !createErr.message.includes('already exists')) {
-      console.error('[storage] createBucket failed:', createErr.message);
-      throw new StorageUploadError(`Supabase bucket creation failed: ${createErr.message}`);
-    }
-    console.log('[storage] Bucket "proofs" created successfully.');
-  }
-
-  _bucketReady = true;
-}
+// ── Bucket note ───────────────────────────────────────────────────
+// The "proofs" bucket is created manually in the Supabase dashboard
+// (private, JPEG/PNG/WebP only, 10 MB file-size limit).
+// No runtime bucket-creation logic is needed or used here.
 
 // ── Path helpers ──────────────────────────────────────────────────
 
@@ -133,8 +102,6 @@ export async function uploadProof(
   file: File | Blob | ArrayBuffer,
   mimeType: string,
 ): Promise<string> {
-  await ensureBucket();
-
   const supabase = getClient();
 
   console.log('[storage.upload] Starting upload:', { storagePath, mimeType, size: file instanceof File ? file.size : '?' });

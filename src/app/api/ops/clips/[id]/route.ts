@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
+import { resolveProofUrl } from '@/lib/storage';
 
 async function dbQuery(sql: string, args: unknown[] = []) {
   const url = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
@@ -202,7 +203,7 @@ export async function GET(
   const pfRow = proofFilesResult.rows[0] as unknown[] | undefined;
   const proofFile = pfRow ? {
     id:               val(pfRow[0]),
-    file_url:         val(pfRow[1]),
+    file_url:         val(pfRow[1]),   // resolved to signed URL below
     file_name:        val(pfRow[2]),
     file_size:        intVal(pfRow[3]),
     mime_type:        val(pfRow[4]),
@@ -214,6 +215,24 @@ export async function GET(
     reviewed_at:      val(pfRow[10]),
     review_note:      val(pfRow[11]),
   } : null;
+
+  // Resolve storage paths → fresh signed URLs (1-hour TTL) so the browser
+  // can actually load the images. Raw paths like "videoId/ts-name.jpg" are
+  // not directly accessible — only signed https:// URLs work.
+  if (proofFile?.file_url) {
+    try {
+      proofFile.file_url = await resolveProofUrl(proofFile.file_url);
+    } catch {
+      // Non-fatal: leave raw path; image will show as broken rather than crash
+    }
+  }
+  if (video.proof_url) {
+    try {
+      video.proof_url = await resolveProofUrl(video.proof_url);
+    } catch {
+      // Non-fatal
+    }
+  }
 
   return NextResponse.json({ video, cutter, episode, snapshots, auditTrail, proofFile });
 }

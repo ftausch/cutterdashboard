@@ -250,11 +250,15 @@ function ProofViewer({
           <img
             src={displayUrl}
             alt="Beleg"
-            className="w-full max-h-72 object-contain bg-muted/20"
+            className="w-full object-contain bg-muted/20"
+            style={{ maxHeight: "70vh", minHeight: "240px" }}
             onError={e => { (e.target as HTMLImageElement).style.opacity = "0.3"; }}
           />
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-            <ZoomIn className="h-7 w-7 text-white drop-shadow" />
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
+            <div className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-white text-sm font-medium backdrop-blur-sm">
+              <ZoomIn className="h-4 w-4" />
+              Vergrößern
+            </div>
           </div>
           {fileCfg && (
             <div className={`absolute top-2 left-2 rounded px-2 py-0.5 text-xs font-medium backdrop-blur-sm ${fileCfg.cls}`}>

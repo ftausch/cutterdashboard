@@ -45,8 +45,11 @@ export async function GET(request: NextRequest) {
       FROM cutter_videos
     `),
     db.execute(`
-      SELECT al.id, al.actor_name, al.action, al.entity_type, al.entity_id, al.meta, al.created_at
+      SELECT al.id, al.actor_name, al.action, al.entity_type, al.entity_id, al.meta, al.created_at,
+             v.title  AS video_title,
+             v.platform AS video_platform
       FROM audit_log al
+      LEFT JOIN cutter_videos v ON v.id = al.entity_id AND al.entity_type = 'video'
       ORDER BY al.created_at DESC
       LIMIT 100
     `),

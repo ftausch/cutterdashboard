@@ -10,6 +10,7 @@ import {
   ArrowLeft, Flag, FlagOff, CheckCircle2, ShieldCheck,
   FileText, RefreshCw, ExternalLink, X, ZoomIn,
 } from "lucide-react";
+import { describeAuditEntry, auditDotClass } from "@/lib/audit-describe";
 
 interface ProofFile {
   id: string | null;
@@ -111,25 +112,6 @@ const PROOF_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   no_proof_needed:          { label: "—",                    cls: "bg-muted/50 text-muted-foreground border-border" },
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  "video.mark_reviewed":      "Als geprüft markiert",
-  "video.flag":               "Geflaggt",
-  "video.unflag":             "Entflaggt",
-  "video.approve_proof":      "Beleg genehmigt",
-  "video.reject_proof":       "Beleg abgelehnt",
-  "video.request_proof":      "Beleg angefordert",
-  "video.start_review":       "Prüfung gestartet",
-  "video.request_reupload":   "Neu einreichen angefordert",
-  "video.add_note":           "Notiz hinzugefügt",
-  "video.set_verified":       "Als verifiziert gesetzt",
-  "video.proof_file_approve": "Datei genehmigt",
-  "video.proof_file_reject":  "Datei abgelehnt",
-  "video.proof_file_reset":   "Datei zurückgesetzt",
-  "proof_approve":            "Beleg genehmigt",
-  "proof_reject":             "Beleg abgelehnt",
-  "note_add":                 "Notiz hinzugefügt",
-  "note_delete":              "Notiz gelöscht",
-};
 
 function formatNum(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -749,7 +731,7 @@ export default function ClipDetailPage() {
                     <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-muted-foreground/40 shrink-0 mt-1.5" />
                     <div className="flex-1 min-w-0">
                       <span className="text-foreground/80">
-                        {ACTION_LABELS[entry.action ?? ""] ?? entry.action}
+                        {describeAuditEntry(entry.action, entry.meta, entry.actor_name)}
                       </span>
                       {entry.actor_name && (
                         <span className="text-muted-foreground"> · {entry.actor_name}</span>
@@ -895,40 +877,46 @@ export default function ClipDetailPage() {
           </div>
         )}
 
-        {/* Audit trail */}
-        {auditTrail.length > 0 && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-3 border-b border-border">
-              <h2 className="font-semibold text-sm">Audit-Verlauf</h2>
+        {/* Activity Log */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+            <h2 className="font-semibold text-sm">Aktivitätslog</h2>
+            <span className="text-xs text-muted-foreground tabular-nums">{auditTrail.length} Einträge</span>
+          </div>
+          {auditTrail.length === 0 ? (
+            <div className="flex flex-col items-center py-10 gap-2 text-center">
+              <p className="text-xs text-muted-foreground">Noch keine Aktivitäten für diesen Clip.</p>
             </div>
-            <div className="divide-y divide-border">
+          ) : (
+            <div className="divide-y divide-border/60">
               {auditTrail.map((entry, i) => {
-                let metaObj: Record<string, unknown> = {};
-                try { metaObj = entry.meta ? JSON.parse(entry.meta) : {}; } catch { /* ignore */ }
-                const metaKeys = Object.keys(metaObj).filter(k => metaObj[k] !== null && metaObj[k] !== undefined && metaObj[k] !== "");
+                const description = describeAuditEntry(entry.action, entry.meta, entry.actor_name);
+                const dotCls      = auditDotClass(entry.action);
                 return (
-                  <div key={entry.id ?? i} className="flex items-start gap-3 px-5 py-3">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground mt-0.5">
+                  <div key={entry.id ?? i} className="flex items-start gap-3 px-5 py-3.5 group">
+                    {/* Avatar */}
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground mt-0.5 select-none">
                       {(entry.actor_name ?? "?").slice(0, 1).toUpperCase()}
                     </div>
+                    {/* Description */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm">
-                        <span className="font-medium">{entry.actor_name ?? "Unbekannt"}</span>{" "}
-                        <span className="text-muted-foreground">{ACTION_LABELS[entry.action ?? ""] ?? entry.action ?? "Aktion"}</span>
-                      </p>
-                      {metaKeys.length > 0 && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {metaKeys.map(k => `${k}: ${metaObj[k]}`).join(" · ")}
-                        </p>
-                      )}
+                      <p className="text-sm leading-snug">{description}</p>
+                      {/* Colored action tag */}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full shrink-0 ${dotCls}`} />
+                        <span className="text-xs text-muted-foreground/60 font-mono">{entry.action ?? "—"}</span>
+                      </div>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(entry.created_at)}</span>
+                    {/* Timestamp */}
+                    <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap pt-0.5">
+                      {formatDateTime(entry.created_at)}
+                    </span>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
       </main>
     </>

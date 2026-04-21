@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
   ShieldAlert, Users, Video, CheckCircle2, AlertTriangle,
   XCircle, ChevronRight, RefreshCw, ClipboardList,
 } from "lucide-react";
+import { describeAuditEntry, auditDotClass } from "@/lib/audit-describe";
 
 interface AlertRow {
   id: string; cutter_id: string; video_id: string | null;
@@ -21,6 +23,7 @@ interface CutterRow {
 interface AuditRow {
   id: string; actor_name: string; action: string; entity_type: string;
   entity_id: string | null; meta: string | null; created_at: string;
+  video_title: string | null; video_platform: string | null;
 }
 interface VideoStats { total: number; verified: number; suspicious: number; critical: number; matched: number; }
 interface OpsData { alerts: AlertRow[]; cutters: CutterRow[]; stats: VideoStats; auditLog: AuditRow[]; }
@@ -40,19 +43,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", facebook: "Facebook",
 };
 
-const ACTION_LABELS: Record<string, string> = {
-  video_submit: "Video eingereicht", video_delete: "Video gelöscht",
-  invoice_generate: "Rechnung erstellt", invoice_sent: "Rechnung versendet", invoice_paid: "Rechnung bezahlt",
-  cutter_deactivate: "Cutter deaktiviert", cutter_reactivate: "Cutter reaktiviert", cutter_create: "Cutter angelegt",
-  alert_resolve: "Alert gelöst", alert_dismiss: "Alert verworfen",
-};
-
-const ACTION_DOT: Record<string, string> = {
-  video_submit: "bg-blue-400", invoice_generate: "bg-emerald-400",
-  invoice_sent: "bg-emerald-400", invoice_paid: "bg-emerald-400",
-  cutter_deactivate: "bg-red-400", cutter_reactivate: "bg-emerald-400",
-  cutter_create: "bg-blue-400", alert_resolve: "bg-emerald-400", alert_dismiss: "bg-yellow-400",
-};
 
 function formatNum(n: number | null | undefined): string {
   if (n == null) return "0";
@@ -327,33 +317,44 @@ export default function OpsPage() {
                   <p className="text-sm text-muted-foreground">Noch keine Audit-Einträge vorhanden.</p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-border bg-card divide-y divide-border overflow-hidden">
+                <div className="rounded-lg border border-border bg-card divide-y divide-border/60 overflow-hidden">
                   {auditLog.map((entry) => {
-                    let metaObj: Record<string, unknown> = {};
-                    try { metaObj = entry.meta ? JSON.parse(entry.meta) : {}; } catch { /* ignore */ }
-                    const dot = ACTION_DOT[entry.action] ?? "bg-muted-foreground/30";
+                    const description = describeAuditEntry(entry.action, entry.meta, entry.actor_name);
+                    const dotCls      = auditDotClass(entry.action);
+                    const isVideoAction = entry.entity_type === "video" && entry.entity_id;
 
                     return (
-                      <div key={entry.id} className="flex items-start gap-4 px-5 py-3.5">
-                        <div className="mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${dot}">
-                          <span className={`block h-full w-full rounded-full ${dot}`} />
+                      <div key={entry.id} className="flex items-start gap-3.5 px-5 py-3.5">
+                        {/* Dot */}
+                        <div className="mt-2 shrink-0">
+                          <span className={`block h-2 w-2 rounded-full ${dotCls}`} />
                         </div>
+                        {/* Content */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-sm font-medium">
-                              {ACTION_LABELS[entry.action] ?? entry.action}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              von <span className="text-foreground/60">{entry.actor_name}</span>
-                            </span>
-                          </div>
-                          {Object.keys(metaObj).length > 0 && (
-                            <p className="mt-0.5 text-xs text-muted-foreground/60">
-                              {Object.entries(metaObj).map(([k, v]) => `${k}: ${v}`).join(" · ")}
-                            </p>
+                          <p className="text-sm leading-snug">{description}</p>
+                          {/* Video link if this event is about a clip */}
+                          {isVideoAction && (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              {entry.video_platform && (
+                                <span className="text-xs text-muted-foreground/50">
+                                  {PLATFORM_LABELS[entry.video_platform] ?? entry.video_platform}
+                                </span>
+                              )}
+                              <Link
+                                href={`/ops/clips/${entry.entity_id}`}
+                                className="text-xs text-muted-foreground/50 hover:text-foreground/70 transition-colors flex items-center gap-0.5"
+                              >
+                                {entry.video_title
+                                  ? <span className="truncate max-w-[220px]">{entry.video_title}</span>
+                                  : <span className="font-mono">{entry.entity_id!.slice(0, 8)}…</span>
+                                }
+                                <ChevronRight className="h-3 w-3 shrink-0" />
+                              </Link>
+                            </div>
                           )}
                         </div>
-                        <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums">
+                        {/* Timestamp */}
+                        <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums whitespace-nowrap pt-0.5">
                           {new Date(entry.created_at).toLocaleString("de-DE", {
                             day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
                           })}

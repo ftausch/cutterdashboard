@@ -2,8 +2,28 @@ import { randomUUID } from 'crypto';
 import type { DbClient } from '@/lib/db';
 
 export type AuditAction =
+  // ── Clip lifecycle ──────────────────────────────────────────────
   | 'video_submit'
   | 'video_delete'
+  // ── Claimed views ───────────────────────────────────────────────
+  | 'video.claimed_views_updated'
+  // ── Proof (dot-notation actions written by the ops actions route) ─
+  | 'video.proof_uploaded'
+  | 'video.approve_proof'
+  | 'video.reject_proof'
+  | 'video.request_proof'
+  | 'video.start_review'
+  | 'video.request_reupload'
+  | 'video.proof_file_approve'
+  | 'video.proof_file_reject'
+  | 'video.proof_file_reset'
+  // ── Clip review ─────────────────────────────────────────────────
+  | 'video.mark_reviewed'
+  | 'video.flag'
+  | 'video.unflag'
+  | 'video.add_note'
+  | 'video.set_verified'
+  // ── Legacy / lib/audit-style action names ────────────────────────
   | 'invoice_generate'
   | 'invoice_sent'
   | 'invoice_paid'
@@ -18,7 +38,7 @@ export type AuditAction =
   | 'proof_request'
   | 'proof_start_review'
   | 'proof_reupload_request'
-  // clip notes — internal-only notes are silent; cutter-visible adds + all deletes are audited
+  // clip notes
   | 'note_add'
   | 'note_delete';
 

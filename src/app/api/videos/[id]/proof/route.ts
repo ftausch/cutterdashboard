@@ -355,7 +355,24 @@ export async function POST(
     );
   }
 
-  // ── 10. Generate a signed URL for the immediate response ──────
+  // ── 10. Audit log (fire-and-forget) ──────────────────────────
+  db.execute({
+    sql: `INSERT INTO audit_log (id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at)
+          VALUES (?, ?, ?, 'video.proof_uploaded', 'video', ?, ?, datetime('now'))`,
+    args: [
+      randomUUID(),
+      auth.id,
+      auth.name,
+      videoId,
+      JSON.stringify({
+        file_name:  file.name || null,
+        file_size:  file.size,
+        is_reupload: existingRows.length > 0,
+      }),
+    ],
+  }).catch(e => console.warn('[proof/upload] audit_log write failed (non-fatal):', errMsg(e)));
+
+  // ── 11. Generate a signed URL for the immediate response ──────
   let signedUrl: string = uploadedPath;
   try {
     signedUrl = await getSignedUrl(uploadedPath);
@@ -363,7 +380,7 @@ export async function POST(
     console.warn('[proof/upload] Could not generate signed URL for response (non-fatal):', errMsg(e));
   }
 
-  // ── 11. Non-critical side effects ─────────────────────────────
+  // ── 12. Non-critical side effects ─────────────────────────────
   try { await recalculateReliabilityScore(db, auth.id); } catch (e) {
     console.warn('[proof/upload] recalculateReliabilityScore failed (non-fatal):', errMsg(e));
   }

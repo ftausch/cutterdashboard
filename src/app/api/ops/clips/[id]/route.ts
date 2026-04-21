@@ -152,7 +152,7 @@ export async function GET(
         `SELECT id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at
          FROM audit_log
          WHERE entity_type = 'video' AND entity_id = ?
-         ORDER BY created_at DESC LIMIT 30`,
+         ORDER BY created_at DESC LIMIT 50`,
         [id]
       ),
       // Silently create table then query (with all review fields)

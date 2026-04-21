@@ -4,6 +4,7 @@ import { ensureDb } from '@/lib/db';
 import { calculateDiscrepancy } from '@/lib/verification/discrepancy';
 import type { VerificationSource } from '@/lib/verification/types';
 import { resolveProofUrl } from '@/lib/storage';
+import { randomUUID } from 'crypto';
 
 export async function GET(
   request: NextRequest,
@@ -167,10 +168,10 @@ export async function PATCH(
     return NextResponse.json({ error: 'Datenbankverbindung fehlgeschlagen.' }, { status: 503 });
   }
 
-  let video: { id: string; platform: string; current_views: number; verification_source: string | null } | undefined;
+  let video: { id: string; platform: string; current_views: number; claimed_views: number | null; verification_source: string | null } | undefined;
   try {
     const videoResult = await db.execute({
-      sql: `SELECT id, platform, current_views, verification_source FROM cutter_videos WHERE id = ? AND cutter_id = ?`,
+      sql: `SELECT id, platform, current_views, claimed_views, verification_source FROM cutter_videos WHERE id = ? AND cutter_id = ?`,
       args: [id, auth.id],
     });
     video = videoResult.rows[0] as typeof video;
@@ -237,6 +238,19 @@ export async function PATCH(
     });
     return NextResponse.json({ error: `Datenbankfehler beim Speichern: ${msg}` }, { status: 500 });
   }
+
+  // Audit log — fire-and-forget (non-fatal if it fails)
+  db.execute({
+    sql: `INSERT INTO audit_log (id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at)
+          VALUES (?, ?, ?, 'video.claimed_views_updated', 'video', ?, ?, datetime('now'))`,
+    args: [
+      randomUUID(),
+      auth.id,
+      auth.name,
+      id,
+      JSON.stringify({ from: video.claimed_views ?? null, to: claimed_views ?? null }),
+    ],
+  }).catch(e => console.warn('[PATCH /api/videos/:id] audit_log write failed (non-fatal):', e));
 
   return NextResponse.json({ success: true, discrepancy_status: discrepancyStatus, discrepancy_percent: discrepancyPercent });
 }

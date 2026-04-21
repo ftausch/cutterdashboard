@@ -31,8 +31,22 @@ function getClient(): SupabaseClient {
   if (!key) throw new StorageConfigError('SUPABASE_SERVICE_ROLE_KEY is not set. Add it to your Vercel environment variables.');
   if (!url.startsWith('https://')) throw new StorageConfigError(`SUPABASE_URL looks wrong: "${url}". Expected format: https://<project>.supabase.co`);
 
+  // global.headers.Authorization forces the service-role JWT onto every
+  // request (including Storage uploads).  Without this, @supabase/supabase-js
+  // v2 may send an anonymous Bearer token from its internal auth session,
+  // causing Supabase Storage to apply RLS as the "anon" role and reject the
+  // insert into storage.objects with "new row violates row-level security policy".
   _supabase = createClient(url, key, {
-    auth: { persistSession: false },
+    auth: {
+      autoRefreshToken:   false,
+      persistSession:     false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${key}`,
+      },
+    },
   });
   return _supabase;
 }

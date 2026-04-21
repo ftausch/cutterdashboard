@@ -151,6 +151,22 @@ export default function OpsPage() {
           </button>
         </div>
 
+        {/* ── Quick links ──────────────────────────────────────── */}
+        <div className="flex gap-2 flex-wrap">
+          <a
+            href="/ops/queue"
+            className="flex items-center gap-1.5 rounded-md border border-primary/25 bg-primary/8 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 transition-colors"
+          >
+            Review Queue →
+          </a>
+          <a
+            href="/ops/billing"
+            className="flex items-center gap-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+          >
+            Abrechnungsvorbereitung →
+          </a>
+        </div>
+
         {/* ── KPI row ──────────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <KpiCard icon={<Video className="h-4 w-4" />}              label="Videos gesamt" value={formatNum(stats.total)} />

@@ -8,7 +8,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import {
   Scissors, ChevronDown, User, Receipt, Link2,
   ShieldCheck, List, Bell, BarChart2, Settings, LogOut,
-  Menu, X, Home, Video, TrendingUp, BookOpen,
+  Menu, X, Home, Video, TrendingUp, BookOpen, ListChecks, Wallet,
 } from "lucide-react";
 
 interface CutterSession {
@@ -45,10 +45,12 @@ const SECONDARY_NAV: SecondaryItem[] = [
   { href: "/invoices",      label: "Rechnungen", icon: Receipt,     match: (p) => p.startsWith("/invoices") },
   { href: "/accounts",      label: "Konten",     icon: Link2,       match: (p) => p.startsWith("/accounts") },
   { href: "/ops",           label: "Ops",        icon: ShieldCheck, match: (p) => p === "/ops",                   opsOnly: true },
+  { href: "/ops/queue",     label: "Queue",      icon: ListChecks,  match: (p) => p.startsWith("/ops/queue"),     opsOnly: true },
   { href: "/ops/cutters",   label: "Cutter",     icon: User,        match: (p) => p.startsWith("/ops/cutters"),   opsOnly: true },
   { href: "/ops/clips",     label: "Clips",      icon: List,        match: (p) => p.startsWith("/ops/clips"),     opsOnly: true },
   { href: "/ops/alerts",    label: "Alerts",     icon: Bell,        match: (p) => p.startsWith("/ops/alerts"),    opsOnly: true },
   { href: "/ops/analytics", label: "Analytics",  icon: BarChart2,   match: (p) => p.startsWith("/ops/analytics"), opsOnly: true },
+  { href: "/ops/billing",   label: "Abrechnung", icon: Wallet,      match: (p) => p.startsWith("/ops/billing"),   opsOnly: true },
   { href: "/admin",         label: "Admin",      icon: Settings,    match: (p) => p.startsWith("/admin"),         adminOnly: true },
 ];
 

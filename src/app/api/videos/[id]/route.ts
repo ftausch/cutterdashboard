@@ -3,6 +3,7 @@ import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { calculateDiscrepancy } from '@/lib/verification/discrepancy';
 import type { VerificationSource } from '@/lib/verification/types';
+import { resolveProofUrl } from '@/lib/storage';
 
 export async function GET(
   request: NextRequest,
@@ -37,9 +38,20 @@ export async function GET(
   }
 
   const r = result.rows[0] as Record<string, unknown>;
-  const currentViews   = (r.current_views   as number) ?? 0;
-  const lastInvoice    = (r.views_at_last_invoice as number) ?? 0;
-  const unbilledViews  = Math.max(0, currentViews - lastInvoice);
+  const currentViews  = (r.current_views          as number) ?? 0;
+  const lastInvoice   = (r.views_at_last_invoice  as number) ?? 0;
+  const unbilledViews = Math.max(0, currentViews - lastInvoice);
+
+  // Resolve proof_url: if it's a Supabase storage path generate a signed URL;
+  // if it's already a full https:// URL (legacy Blob) return it as-is.
+  let proofUrl = r.proof_url as string | null;
+  if (proofUrl) {
+    try {
+      proofUrl = await resolveProofUrl(proofUrl);
+    } catch {
+      // Non-fatal — return the raw value as fallback
+    }
+  }
 
   return NextResponse.json({
     video: {
@@ -57,7 +69,7 @@ export async function GET(
       verification_source:  r.verification_source,
       discrepancy_status:   r.discrepancy_status,
       discrepancy_percent:  r.discrepancy_percent,
-      proof_url:            r.proof_url,
+      proof_url:            proofUrl,              // signed URL or legacy Blob URL
       proof_status:         r.proof_status,
       proof_cutter_note:    r.proof_cutter_note,
       proof_rejection_reason: r.proof_rejection_reason,

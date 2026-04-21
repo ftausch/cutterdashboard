@@ -146,29 +146,27 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 }
 
 // ── Client-side validation (mirrors backend rules) ────────────────
-const CLIENT_MAX_BYTES = 4.5 * 1024 * 1024; // 4.5 MB — Vercel function body limit
+const CLIENT_MAX_BYTES = 8 * 1024 * 1024; // 8 MB — Supabase Storage limit
 
 function validateFile(file: File): string | null {
+  if (file.size === 0) {
+    return "Die Datei ist leer. Bitte wähle eine gültige Bilddatei.";
+  }
   // Normalise MIME type: some OS/browsers send "image/jpg" or empty string
   const rawType = (file.type || "").toLowerCase().trim();
   let effectiveType = rawType === "image/jpg" ? "image/jpeg" : rawType;
   if (!effectiveType) {
     const name = file.name.toLowerCase();
     if (name.endsWith(".jpg") || name.endsWith(".jpeg")) effectiveType = "image/jpeg";
-    else if (name.endsWith(".png")) effectiveType = "image/png";
+    else if (name.endsWith(".png"))  effectiveType = "image/png";
     else if (name.endsWith(".webp")) effectiveType = "image/webp";
-    else if (name.endsWith(".heic") || name.endsWith(".heif")) effectiveType = "image/heic";
-    else if (name.endsWith(".pdf")) effectiveType = "application/pdf";
   }
-  if (!effectiveType.startsWith("image/") && effectiveType !== "application/pdf") {
-    return `Ungültiger Dateityp („${(file.type || file.name.split(".").pop()) ?? "?"})". Bitte ein Bild hochladen (JPEG, PNG, WebP).`;
+  if (!["image/jpeg", "image/png", "image/webp"].includes(effectiveType)) {
+    return `Ungültiger Dateityp („${(file.type || file.name.split(".").pop()) ?? "?"}"). Bitte ein Bild hochladen (JPEG, PNG, WebP).`;
   }
   if (file.size > CLIENT_MAX_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
-    return `Datei ist zu groß (${mb} MB). Maximal 4,5 MB erlaubt.`;
-  }
-  if (file.size === 0) {
-    return "Die Datei ist leer. Bitte wähle eine gültige Bilddatei.";
+    return `Datei ist zu groß (${mb} MB). Maximal 8 MB erlaubt.`;
   }
   return null; // valid
 }
@@ -188,7 +186,7 @@ async function parseUploadError(res: Response): Promise<string> {
     case 401: return "Sitzung abgelaufen — bitte neu anmelden.";
     case 403: return "Keine Berechtigung für diesen Clip.";
     case 409: return "Für diesen Clip existiert bereits ein Nachweis. Bitte zuerst löschen.";
-    case 413: return "Datei ist zu groß für den Server (max. 4,5 MB).";
+    case 413: return "Datei ist zu groß für den Server (max. 8 MB).";
     case 415: return "Dateityp wird nicht unterstützt. Bitte JPEG, PNG oder WebP hochladen.";
     case 503: return "Server vorübergehend nicht erreichbar — bitte in einer Minute erneut versuchen.";
     default:  return `Server-Fehler (${res.status}) — bitte erneut versuchen.`;

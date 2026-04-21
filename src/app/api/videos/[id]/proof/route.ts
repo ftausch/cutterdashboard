@@ -1,37 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put, del } from '@vercel/blob';
 import { requireCutterAuth, isCutter } from '@/lib/cutter/middleware';
 import { ensureDb } from '@/lib/db';
 import { recalculateReliabilityScore } from '@/lib/reliability';
 import { createOpsNotification } from '@/lib/notifications';
 import { upsertAlert, resolveAlert } from '@/lib/ops-alerts';
+import {
+  uploadProof,
+  deleteProof,
+  getSignedUrl,
+  resolveProofUrl,
+  buildStoragePath,
+  isStoragePath,
+  StorageConfigError,
+  StorageUploadError,
+} from '@/lib/storage';
 import { randomUUID } from 'crypto';
 
 type DbClient = Awaited<ReturnType<typeof ensureDb>>;
 
-// Accepted MIME types — kept in one place so frontend + backend stay in sync
+// Accepted MIME types — images only (PDF removed; Supabase bucket only allows images)
 export const ACCEPTED_MIME_TYPES = [
   'image/jpeg',
-  'image/jpg',   // non-standard alias — some browsers/OS still emit this
+  'image/jpg',  // non-standard alias — normalised to image/jpeg below
   'image/png',
   'image/webp',
-  'image/heic',
-  'image/heif',
-  'image/gif',
-  'application/pdf',
 ];
 
-// Maximum upload size enforced on the backend (must match frontend warning)
-const MAX_FILE_BYTES = 4.5 * 1024 * 1024; // 4.5 MB — Vercel hobby function body limit
+// Maximum upload size
+const MAX_FILE_BYTES = 8 * 1024 * 1024; // 8 MB — Supabase Storage default limit
 
 // ── Schema migrations (idempotent) ───────────────────────────────
 
-/**
- * Ensure cutter_videos has all proof-related columns.
- * Runs ALTER TABLE only if the column is missing — SQLite ignores the error otherwise.
- */
 async function ensureCutterVideosProofColumns(db: DbClient) {
-  const migrations = [
+  const cols = [
     `ALTER TABLE cutter_videos ADD COLUMN proof_url              TEXT`,
     `ALTER TABLE cutter_videos ADD COLUMN proof_uploaded_at      TEXT`,
     `ALTER TABLE cutter_videos ADD COLUMN proof_status           TEXT`,
@@ -43,7 +44,7 @@ async function ensureCutterVideosProofColumns(db: DbClient) {
     `ALTER TABLE cutter_videos ADD COLUMN proof_requested_at     TEXT`,
     `ALTER TABLE cutter_videos ADD COLUMN proof_requested_by     TEXT`,
   ];
-  for (const sql of migrations) {
+  for (const sql of cols) {
     try { await db.execute({ sql, args: [] }); } catch { /* column already exists */ }
   }
 }
@@ -51,42 +52,57 @@ async function ensureCutterVideosProofColumns(db: DbClient) {
 async function ensureProofFilesTable(db: DbClient) {
   await db.execute({
     sql: `CREATE TABLE IF NOT EXISTS cutter_proof_files (
-      id            TEXT PRIMARY KEY,
-      video_id      TEXT NOT NULL,
-      cutter_id     TEXT NOT NULL,
-      file_url      TEXT NOT NULL,
-      file_name     TEXT,
-      file_size     INTEGER,
-      mime_type     TEXT,
-      display_order INTEGER NOT NULL DEFAULT 0,
-      proof_status  TEXT NOT NULL DEFAULT 'uploaded',
-      uploader_note TEXT,
+      id               TEXT PRIMARY KEY,
+      video_id         TEXT NOT NULL,
+      cutter_id        TEXT NOT NULL,
+      file_url         TEXT NOT NULL,
+      file_name        TEXT,
+      file_size        INTEGER,
+      mime_type        TEXT,
+      display_order    INTEGER NOT NULL DEFAULT 0,
+      proof_status     TEXT NOT NULL DEFAULT 'uploaded',
+      uploader_note    TEXT,
       reviewed_by_id   TEXT,
       reviewed_by_name TEXT,
-      reviewed_at   TEXT,
-      review_note   TEXT,
-      uploaded_at   TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      reviewed_at      TEXT,
+      review_note      TEXT,
+      uploaded_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
     args: [],
   });
 
   const migrations = [
-    `ALTER TABLE cutter_proof_files ADD COLUMN proof_status  TEXT NOT NULL DEFAULT 'uploaded'`,
-    `ALTER TABLE cutter_proof_files ADD COLUMN uploader_note TEXT`,
+    `ALTER TABLE cutter_proof_files ADD COLUMN proof_status     TEXT NOT NULL DEFAULT 'uploaded'`,
+    `ALTER TABLE cutter_proof_files ADD COLUMN uploader_note    TEXT`,
     `ALTER TABLE cutter_proof_files ADD COLUMN reviewed_by_id   TEXT`,
     `ALTER TABLE cutter_proof_files ADD COLUMN reviewed_by_name TEXT`,
-    `ALTER TABLE cutter_proof_files ADD COLUMN reviewed_at   TEXT`,
-    `ALTER TABLE cutter_proof_files ADD COLUMN review_note   TEXT`,
-    `ALTER TABLE cutter_proof_files ADD COLUMN updated_at    TEXT DEFAULT (datetime('now'))`,
+    `ALTER TABLE cutter_proof_files ADD COLUMN reviewed_at      TEXT`,
+    `ALTER TABLE cutter_proof_files ADD COLUMN review_note      TEXT`,
+    `ALTER TABLE cutter_proof_files ADD COLUMN updated_at       TEXT DEFAULT (datetime('now'))`,
   ];
   for (const sql of migrations) {
-    try { await db.execute({ sql, args: [] }); } catch { /* column already exists */ }
+    try { await db.execute({ sql, args: [] }); } catch { /* already exists */ }
   }
 }
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Map a storage path or legacy Vercel Blob URL to a signed URL.
+ * Returns null if the input is empty/null.
+ */
+async function toViewableUrl(fileUrl: string | null): Promise<string | null> {
+  if (!fileUrl) return null;
+  try {
+    return await resolveProofUrl(fileUrl);
+  } catch (e) {
+    console.warn('[proof] Could not resolve proof URL:', fileUrl, errMsg(e));
+    // Return the raw value as fallback (old Blob URLs still work)
+    return fileUrl;
+  }
 }
 
 // ── GET: return the single active proof for this clip (or null) ──
@@ -122,10 +138,15 @@ export async function GET(
   if (!fileResult.rows[0]) return NextResponse.json({ proof: null });
 
   const r = fileResult.rows[0] as unknown as Record<string, unknown>;
+
+  // Resolve the stored path/URL to a viewable signed URL
+  const viewableUrl = await toViewableUrl(r.file_url as string | null);
+
   return NextResponse.json({
     proof: {
       id:               r.id              as string,
-      file_url:         r.file_url        as string,
+      file_url:         viewableUrl,                    // signed URL or legacy Blob URL
+      file_path:        r.file_url        as string,    // raw stored path (for ops/delete)
       file_name:        r.file_name       as string | null,
       file_size:        r.file_size       as number | null,
       mime_type:        r.mime_type       as string | null,
@@ -149,15 +170,16 @@ export async function POST(
 
   const { id: videoId } = await params;
 
-  // ── 1. Auth & video ownership ─────────────────────────────────
+  // ── 1. DB connection ──────────────────────────────────────────
   let db: DbClient;
   try {
     db = await ensureDb();
   } catch (e) {
     console.error('[proof/upload] DB connection failed:', errMsg(e));
-    return NextResponse.json({ error: 'Datenbankverbindung fehlgeschlagen' }, { status: 503 });
+    return NextResponse.json({ error: 'Datenbankverbindung fehlgeschlagen.' }, { status: 503 });
   }
 
+  // ── 2. Video ownership check ───────────────────────────────────
   const videoResult = await db.execute({
     sql: `SELECT id, cutter_id, proof_status FROM cutter_videos WHERE id = ? AND cutter_id = ?`,
     args: [videoId, auth.id],
@@ -167,7 +189,7 @@ export async function POST(
   } | undefined;
 
   if (!video) {
-    return NextResponse.json({ error: 'Video nicht gefunden oder keine Berechtigung' }, { status: 404 });
+    return NextResponse.json({ error: 'Video nicht gefunden oder keine Berechtigung.' }, { status: 404 });
   }
   if (video.proof_status === 'proof_approved') {
     return NextResponse.json(
@@ -176,7 +198,7 @@ export async function POST(
     );
   }
 
-  // ── 2. One-proof-per-clip enforcement ─────────────────────────
+  // ── 3. One-proof-per-clip enforcement ─────────────────────────
   await ensureProofFilesTable(db);
 
   const existingResult = await db.execute({
@@ -190,12 +212,12 @@ export async function POST(
     );
   }
 
-  // ── 3. Parse multipart form data ──────────────────────────────
+  // ── 4. Parse multipart form data ──────────────────────────────
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch (e) {
-    console.error('[proof/upload] formData() failed for clip', videoId, '—', errMsg(e));
+    console.error('[proof/upload] formData() failed:', videoId, errMsg(e));
     return NextResponse.json(
       { error: 'Formulardaten konnten nicht gelesen werden. Bitte erneut versuchen.' },
       { status: 400 }
@@ -209,86 +231,72 @@ export async function POST(
     return NextResponse.json({ error: 'Keine Datei empfangen.' }, { status: 400 });
   }
 
-  // ── 4. MIME type normalization & validation ────────────────────
-  // Some browsers / iOS / Android report empty or non-standard types.
-  // Normalise known aliases before checking.
+  // ── 5. MIME type normalisation & validation ───────────────────
   let fileType = (file.type || '').toLowerCase().trim();
-  if (fileType === 'image/jpg') fileType = 'image/jpeg'; // normalize non-standard alias
+  if (fileType === 'image/jpg') fileType = 'image/jpeg';
   if (!fileType) {
-    // Fall back based on file extension
     const name = (file.name || '').toLowerCase();
     if (name.endsWith('.jpg') || name.endsWith('.jpeg')) fileType = 'image/jpeg';
-    else if (name.endsWith('.png')) fileType = 'image/png';
+    else if (name.endsWith('.png'))  fileType = 'image/png';
     else if (name.endsWith('.webp')) fileType = 'image/webp';
-    else if (name.endsWith('.heic') || name.endsWith('.heif')) fileType = 'image/heic';
-    else if (name.endsWith('.pdf')) fileType = 'application/pdf';
     else fileType = 'image/jpeg'; // last-resort default for camera photos
   }
 
-  const isImage = fileType.startsWith('image/');
-  const isPdf   = fileType === 'application/pdf';
-  if (!isImage && !isPdf) {
-    console.warn('[proof/upload] Rejected file type:', { videoId, fileName: file.name, fileType });
+  if (!fileType.startsWith('image/')) {
+    console.warn('[proof/upload] Rejected MIME type:', { videoId, fileType, fileName: file.name });
     return NextResponse.json(
       { error: `Ungültiger Dateityp: "${file.type || 'unbekannt'}". Bitte ein Bild (JPEG, PNG, WebP) hochladen.` },
       { status: 415 }
     );
   }
+  // Normalise to only the three types Supabase bucket accepts
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(fileType)) {
+    fileType = 'image/jpeg';
+  }
 
-  // ── 5. Size validation ────────────────────────────────────────
+  // ── 6. Size validation ────────────────────────────────────────
   if (file.size > MAX_FILE_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
     return NextResponse.json(
-      { error: `Datei ist zu groß (${mb} MB). Maximal 4,5 MB erlaubt.` },
+      { error: `Datei ist zu groß (${mb} MB). Maximal 8 MB erlaubt.` },
       { status: 413 }
     );
   }
 
-  // ── 6. Build storage path ──────────────────────────────────────
-  const extMap: Record<string, string> = {
-    'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
-    'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif',
-    'application/pdf': 'pdf',
-  };
-  const ext    = extMap[fileType] ?? 'jpg';
-  const fileId = randomUUID();
-  const blobPath = `proofs/${videoId}/${fileId}.${ext}`;
+  // ── 7. Build Supabase storage path ────────────────────────────
+  const fileId      = randomUUID();
+  const storagePath = buildStoragePath(videoId, file.name || fileId, fileType);
 
-  console.log('[proof/upload] Starting upload:', {
-    videoId, fileId, blobPath,
-    fileName: file.name, fileType, fileSize: file.size,
+  console.log('[proof/upload] Starting Supabase upload:', {
+    videoId, fileId, storagePath, fileType, fileSize: file.size,
   });
 
-  // ── 7. Upload to Vercel Blob ───────────────────────────────────
-  let blobUrl: string;
+  // ── 8. Upload to Supabase Storage ─────────────────────────────
+  let uploadedPath: string;
   try {
-    const result = await put(blobPath, file, {
-      access: 'public',
-      contentType: fileType,
-    });
-    blobUrl = result.url;
-    console.log('[proof/upload] Blob upload succeeded:', { videoId, fileId, blobUrl });
+    uploadedPath = await uploadProof(storagePath, file, fileType);
+    console.log('[proof/upload] Supabase upload succeeded:', { videoId, uploadedPath });
   } catch (e) {
-    console.error('[proof/upload] Blob upload FAILED:', {
-      videoId, fileId, blobPath,
-      fileName: file.name, fileType, fileSize: file.size,
-      error: errMsg(e),
-    });
     const detail = errMsg(e);
-    const hint = detail.includes('token') || detail.includes('BLOB')
-      ? 'Speicher-Token fehlt oder ist ungültig.'
-      : detail.includes('network') || detail.includes('fetch')
-      ? 'Netzwerkfehler beim Hochladen.'
-      : detail;
+    if (e instanceof StorageConfigError) {
+      console.error('[proof/upload] Storage misconfigured:', detail);
+      return NextResponse.json(
+        { error: `Speicher-Konfigurationsfehler: ${detail}` },
+        { status: 500 }
+      );
+    }
+    console.error('[proof/upload] Supabase upload FAILED:', {
+      videoId, storagePath, fileType, fileSize: file.size, error: detail,
+    });
     return NextResponse.json(
-      { error: `Upload fehlgeschlagen: ${hint}` },
+      { error: `Upload fehlgeschlagen: ${detail}` },
       { status: 500 }
     );
   }
 
-  // ── 8. Persist proof record ────────────────────────────────────
-  // Ensure all proof columns exist on cutter_videos before writing to them.
-  // This is a no-op on fully-migrated DBs; protects against missing columns on older schemas.
+  // ── 9. Persist proof record ───────────────────────────────────
+  // We store the Supabase storage PATH (not a URL) in file_url.
+  // Signed URLs are generated on-demand when the proof is retrieved.
   await ensureCutterVideosProofColumns(db);
 
   try {
@@ -297,7 +305,7 @@ export async function POST(
               (id, video_id, cutter_id, file_url, file_name, file_size, mime_type,
                display_order, proof_status, uploader_note)
             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'uploaded', ?)`,
-      args: [fileId, videoId, auth.id, blobUrl, file.name || null, file.size, fileType, note],
+      args: [fileId, videoId, auth.id, uploadedPath, file.name || null, file.size, fileType, note],
     });
 
     await db.execute({
@@ -311,21 +319,29 @@ export async function POST(
                 proof_reviewer_name    = NULL,
                 proof_reviewed_at      = NULL
             WHERE id = ?`,
-      args: [blobUrl, note, videoId],
+      args: [uploadedPath, note, videoId],
     });
   } catch (e) {
-    console.error('[proof/upload] DB persist failed — blob was uploaded but record not saved:', {
-      videoId, fileId, blobUrl, error: errMsg(e),
+    console.error('[proof/upload] DB persist failed — storage file uploaded but record not saved:', {
+      videoId, fileId, uploadedPath, error: errMsg(e),
     });
-    // Try to clean up the orphaned blob
-    try { await del(blobUrl); } catch { /* best effort */ }
+    // Best-effort cleanup of the orphaned storage object
+    await deleteProof(uploadedPath);
     return NextResponse.json(
       { error: 'Datenbankfehler beim Speichern des Nachweises. Bitte erneut versuchen.' },
       { status: 500 }
     );
   }
 
-  // ── 9. Non-critical side effects (failures don't roll back upload) ─
+  // ── 10. Generate a signed URL for the immediate response ──────
+  let signedUrl: string = uploadedPath;
+  try {
+    signedUrl = await getSignedUrl(uploadedPath);
+  } catch (e) {
+    console.warn('[proof/upload] Could not generate signed URL for response (non-fatal):', errMsg(e));
+  }
+
+  // ── 11. Non-critical side effects ─────────────────────────────
   try { await recalculateReliabilityScore(db, auth.id); } catch (e) {
     console.warn('[proof/upload] recalculateReliabilityScore failed (non-fatal):', errMsg(e));
   }
@@ -348,7 +364,12 @@ export async function POST(
     console.warn('[proof/upload] Notification/alert failed (non-fatal):', errMsg(e));
   }
 
-  return NextResponse.json({ success: true, proof_url: blobUrl, file_id: fileId });
+  return NextResponse.json({
+    success:    true,
+    proof_url:  signedUrl,   // viewable URL for immediate use in the UI
+    file_path:  uploadedPath, // storage path (for future reference)
+    file_id:    fileId,
+  });
 }
 
 // ── DELETE: remove the proof for this clip ───────────────────────
@@ -370,7 +391,7 @@ export async function DELETE(
     id: string; cutter_id: string; proof_url: string | null; proof_status: string | null;
   } | undefined;
 
-  if (!video) return NextResponse.json({ error: 'Video nicht gefunden' }, { status: 404 });
+  if (!video) return NextResponse.json({ error: 'Video nicht gefunden.' }, { status: 404 });
   if (video.proof_status === 'proof_approved') {
     return NextResponse.json({ error: 'Genehmigter Nachweis kann nicht entfernt werden.' }, { status: 400 });
   }
@@ -384,10 +405,19 @@ export async function DELETE(
   const fileRow = fileResult.rows[0] as unknown as { id: string; file_url: string } | undefined;
 
   if (fileRow) {
-    try { await del(fileRow.file_url); } catch (e) {
-      console.warn('[proof/delete] Blob delete failed (continuing):', errMsg(e));
+    // Delete from Supabase Storage (or skip gracefully for legacy Blob URLs)
+    if (isStoragePath(fileRow.file_url)) {
+      await deleteProof(fileRow.file_url); // non-throwing
+    } else {
+      // Legacy Vercel Blob URL — we no longer have a token to delete it,
+      // but the DB record still gets cleaned up so the slot is freed.
+      console.log('[proof/delete] Skipping legacy Blob URL deletion (no token):', fileRow.file_url);
     }
-    await db.execute({ sql: `DELETE FROM cutter_proof_files WHERE id = ?`, args: [fileRow.id] });
+
+    await db.execute({
+      sql: `DELETE FROM cutter_proof_files WHERE id = ?`,
+      args: [fileRow.id],
+    });
   }
 
   await db.execute({

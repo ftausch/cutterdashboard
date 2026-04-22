@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@alloc/quick-lru": "^5.2.0",
+    "@anthropic-ai/sdk": "^0.90.0",
     "@libsql/client": "^0.17.2",
     "@supabase/supabase-js": "^2.104.0",
     "@types/nodemailer": "^8.0.0",

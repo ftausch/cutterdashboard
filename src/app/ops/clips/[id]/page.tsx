@@ -415,6 +415,19 @@ export default function ClipDetailPage() {
   // current_views / observed_views for billing.
   const [correctedViews, setCorrectedViews] = useState<string>("");
 
+  // AI proof verification state
+  type AiResult = {
+    extracted_views: number | null;
+    claimed_views:   number;
+    confidence:      'high' | 'medium' | 'low';
+    raw_text:        string;
+    is_match:        boolean;
+    auto_approved:   boolean;
+  };
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult,  setAiResult]  = useState<AiResult | null>(null);
+  const [aiError,   setAiError]   = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     const res = await fetch(`/api/ops/clips/${id}`);
@@ -425,10 +438,34 @@ export default function ClipDetailPage() {
     setData(json);
     // Pre-fill with claimed_views so the admin only needs to type when correcting.
     setCorrectedViews(json.video.claimed_views?.toString() ?? "");
+    setAiResult(null);
+    setAiError(null);
     setLoading(false);
   }, [id, router]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function runAiVerify() {
+    setAiLoading(true);
+    setAiError(null);
+    setAiResult(null);
+    try {
+      const res  = await fetch(`/api/ops/clips/${id}/ai-verify`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) { setAiError(json.error ?? "Fehler"); return; }
+      setAiResult(json);
+      // If auto-approved, reload the clip so status updates
+      if (json.auto_approved) await load();
+      // Pre-fill the correction field with AI's extracted value so admin can
+      // still manually tweak if needed
+      else if (json.extracted_views != null)
+        setCorrectedViews(String(json.extracted_views));
+    } catch {
+      setAiError("Netzwerkfehler");
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   /** Parsed correctedViews value — null when empty or invalid. */
   function parsedCorrectedViews(): number | null {
@@ -721,6 +758,86 @@ export default function ClipDetailPage() {
           {(canApproveReject || canStartReview || canRequestReupload) && (
             <div className="space-y-3 border-t border-border pt-4">
               <p className="text-xs font-medium text-muted-foreground">Prüfungsaktionen</p>
+
+              {/* ── KI-Prüfung ──────────────────────────────────── */}
+              {canApproveReject && (
+                <div className="space-y-2">
+                  <button
+                    onClick={runAiVerify}
+                    disabled={aiLoading || actionLoading !== null}
+                    className="w-full rounded-lg border border-violet-500/30 bg-violet-500/8 py-2.5 text-sm font-medium text-violet-400 hover:bg-violet-500/15 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    {aiLoading
+                      ? <><RefreshCw className="h-4 w-4 animate-spin" /> KI analysiert Screenshot…</>
+                      : "✦ KI-Prüfung — automatisch verifizieren"}
+                  </button>
+
+                  {/* Error */}
+                  {aiError && (
+                    <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+                      {aiError}
+                    </div>
+                  )}
+
+                  {/* Result card */}
+                  {aiResult && !aiResult.auto_approved && (
+                    <div className={`rounded-lg border px-4 py-3 space-y-1.5 ${
+                      aiResult.is_match
+                        ? "border-emerald-500/25 bg-emerald-500/5"
+                        : "border-orange-500/25 bg-orange-500/5"
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <p className={`text-xs font-semibold ${aiResult.is_match ? "text-emerald-400" : "text-orange-400"}`}>
+                          {aiResult.is_match ? "✓ KI bestätigt Views" : "⚠ KI sieht abweichende Views"}
+                        </p>
+                        <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${
+                          aiResult.confidence === "high"   ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400" :
+                          aiResult.confidence === "medium" ? "border-yellow-500/25 bg-yellow-500/10 text-yellow-400" :
+                                                             "border-red-500/25 bg-red-500/10 text-red-400"
+                        }`}>
+                          {aiResult.confidence === "high" ? "Hohe" : aiResult.confidence === "medium" ? "Mittlere" : "Niedrige"} Konfidenz
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <p className="text-muted-foreground">Angegeben</p>
+                          <p className="font-mono font-semibold">{new Intl.NumberFormat("de-DE").format(aiResult.claimed_views)}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">KI liest</p>
+                          <p className={`font-mono font-semibold ${aiResult.is_match ? "text-emerald-400" : "text-orange-400"}`}>
+                            {aiResult.extracted_views != null
+                              ? new Intl.NumberFormat("de-DE").format(aiResult.extracted_views)
+                              : "nicht erkannt"}
+                          </p>
+                        </div>
+                      </div>
+                      {aiResult.raw_text && (
+                        <p className="text-xs text-muted-foreground/60">
+                          Gelesen: &quot;{aiResult.raw_text}&quot;
+                        </p>
+                      )}
+                      {!aiResult.is_match && aiResult.extracted_views != null && (
+                        <p className="text-xs text-orange-400/80">
+                          Korrektur-Feld wurde auf {new Intl.NumberFormat("de-DE").format(aiResult.extracted_views)} gesetzt — bitte prüfen und manuell genehmigen.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Auto-approved success */}
+                  {aiResult?.auto_approved && (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/8 px-4 py-3">
+                      <p className="text-xs font-semibold text-emerald-400">
+                        ✓ Automatisch verifiziert & genehmigt
+                      </p>
+                      <p className="text-xs text-emerald-400/70 mt-0.5">
+                        KI hat {new Intl.NumberFormat("de-DE").format(aiResult.extracted_views!)} Views im Screenshot bestätigt.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Start review */}
               {canStartReview && (

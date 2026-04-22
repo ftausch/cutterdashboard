@@ -38,6 +38,7 @@ const VALID_ACTIONS = [
   'flag',
   'unflag',
   'approve_proof',
+  'approve_and_verify',
   'reject_proof',
   'request_proof',
   'start_review',
@@ -102,6 +103,22 @@ export async function POST(
              verification_status  = 'manual_proof'
          WHERE id = ?`,
         [auth.id, auth.name, now, id]
+      );
+      break;
+
+    case 'approve_and_verify':
+      // One-click: approve the proof AND mark the clip as fully verified.
+      await dbQuery(
+        `UPDATE cutter_videos
+         SET proof_status         = 'proof_approved',
+             proof_reviewer_id    = ?,
+             proof_reviewer_name  = ?,
+             proof_reviewed_at    = ?,
+             verification_status  = 'verified',
+             reviewed_by          = ?,
+             reviewed_at          = ?
+         WHERE id = ?`,
+        [auth.id, auth.name, now, auth.name, now, id]
       );
       break;
 

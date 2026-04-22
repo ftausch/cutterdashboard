@@ -722,14 +722,27 @@ export default function ClipDetailPage() {
                 </button>
               )}
 
-              {/* Approve */}
+              {/* ★ One-click: approve + verify */}
+              {canApproveReject && (
+                <button
+                  onClick={() => doAction("approve_and_verify")}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded-lg bg-emerald-500 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors shadow-sm"
+                >
+                  {actionLoading === "approve_and_verify"
+                    ? <RefreshCw className="h-4 w-4 animate-spin mx-auto" />
+                    : "✓ Genehmigen & Verifiziert"}
+                </button>
+              )}
+
+              {/* Approve proof only (manual_proof, not fully verified) */}
               {canApproveReject && (
                 <button
                   onClick={() => doAction("approve_proof")}
                   disabled={actionLoading !== null}
-                  className="w-full rounded-lg bg-emerald-500/10 py-2.5 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                  className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/8 py-2 text-sm text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50 transition-colors"
                 >
-                  {actionLoading === "approve_proof" ? <RefreshCw className="h-4 w-4 animate-spin mx-auto" /> : "✓ Beleg genehmigen"}
+                  {actionLoading === "approve_proof" ? <RefreshCw className="h-4 w-4 animate-spin mx-auto" /> : "Nur Beleg genehmigen (manueller Nachweis)"}
                 </button>
               )}
 

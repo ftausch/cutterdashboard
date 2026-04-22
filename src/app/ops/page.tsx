@@ -154,8 +154,14 @@ export default function OpsPage() {
         {/* ── Quick links ──────────────────────────────────────── */}
         <div className="flex gap-2 flex-wrap">
           <a
+            href="/ops/inbox"
+            className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+          >
+            Ops Inbox →
+          </a>
+          <a
             href="/ops/queue"
-            className="flex items-center gap-1.5 rounded-md border border-primary/25 bg-primary/8 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 transition-colors"
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
             Review Queue →
           </a>

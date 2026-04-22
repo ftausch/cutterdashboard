@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
-  RefreshCw, X, ChevronRight, ExternalLink,
+  RefreshCw, X, ChevronRight,
   AlertTriangle, ShieldAlert, Clock, FileCheck,
   UploadCloud, FileQuestion, Receipt, Flag,
-  ArrowUpDown, ArrowUp, ArrowDown,
+  ArrowUpDown, ArrowUp, ArrowDown, Timer,
 } from "lucide-react";
+import { URGENCY_CFG, fmtStateAge, nextSlaIn, type UrgencyLevel } from "@/lib/urgency";
 
 // ── Types ────────────────────────────────────────────────────────────
 type InboxCategory =
@@ -31,7 +32,7 @@ type SuggestedAction =
   | "wait_reupload"
   | "unflag";
 
-type SortKey = "priority" | "newest" | "oldest" | "activity" | "views";
+type SortKey = "priority" | "newest" | "oldest" | "activity" | "views" | "urgency";
 type SortDir = "asc" | "desc";
 
 interface InboxItem {
@@ -54,6 +55,8 @@ interface InboxItem {
   created_at: string | null;
   last_activity_at: string | null;
   inbox_category: InboxCategory;
+  state_age_hours: number;
+  urgency: UrgencyLevel;
   priority_score: number;
   suggested_action: SuggestedAction;
 }
@@ -67,6 +70,8 @@ interface InboxData {
     proof_overdue: number;
     billing_ready: number;
     blocked: number;
+    critical_delay: number;
+    overdue: number;
   };
   breakdown: Record<string, number>;
   cutters: { id: string; name: string }[];
@@ -314,6 +319,9 @@ export default function InboxPage() {
     if (filterPlatform !== "all") items = items.filter(i => i.platform === filterPlatform);
     if (filterCutter !== "all")   items = items.filter(i => i.cutter_id === filterCutter);
 
+    const URGENCY_ORDER: Record<UrgencyLevel, number> = {
+      critical_delay: 3, overdue: 2, attention_needed: 1, on_track: 0,
+    };
     const dir = sortDir === "asc" ? 1 : -1;
     return [...items].sort((a, b) => {
       switch (sortKey) {
@@ -322,6 +330,7 @@ export default function InboxPage() {
         case "oldest":   return dir * (new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
         case "activity": return dir * (new Date(b.last_activity_at ?? 0).getTime() - new Date(a.last_activity_at ?? 0).getTime());
         case "views":    return dir * ((b.current_views ?? 0) - (a.current_views ?? 0));
+        case "urgency":  return dir * (URGENCY_ORDER[b.urgency] - URGENCY_ORDER[a.urgency]);
         default:         return 0;
       }
     });
@@ -426,6 +435,18 @@ export default function InboxPage() {
         {/* ── Summary chips ────────────────────────────────────────── */}
         {summary && (
           <div className="flex flex-wrap gap-2">
+            {summary.critical_delay > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
+                <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                {summary.critical_delay} kritisch verzögert
+              </span>
+            )}
+            {summary.overdue > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full border border-orange-500/25 bg-orange-500/8 px-3 py-1 text-xs font-medium text-orange-400">
+                <Timer className="h-3 w-3" />
+                {summary.overdue} überfällig
+              </span>
+            )}
             {summary.critical > 0 && (
               <button onClick={() => setFilterCat(filterCat === "critical" ? "all" : "critical")}
                 className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${filterCat === "critical" ? "bg-red-500/20 border-red-500/40 text-red-300" : "bg-red-500/8 border-red-500/20 text-red-400 hover:bg-red-500/15"}`}>
@@ -584,6 +605,7 @@ export default function InboxPage() {
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Beleg</th>
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Differenz</th>
                     <th className="px-3 py-2.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Abrechn.</th>
+                    <SortTh col="urgency"  label="SLA-Alter" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                     <SortTh col="activity" label="Aktivität" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Aktion</th>
                     <th className="w-10" />
@@ -601,7 +623,11 @@ export default function InboxPage() {
                     return (
                       <tr
                         key={item.id}
-                        className={`border-l-2 ${cat.rowBorder} transition-colors ${isSel ? "bg-primary/5" : "hover:bg-accent/15"}`}
+                        className={`border-l-2 ${cat.rowBorder} transition-colors ${
+                          isSel
+                            ? "bg-primary/5"
+                            : `hover:bg-accent/15 ${URGENCY_CFG[item.urgency ?? "on_track"]?.rowCls ?? ""}`
+                        }`}
                       >
                         {/* Checkbox */}
                         <td className="px-3 py-3">
@@ -677,6 +703,20 @@ export default function InboxPage() {
                             ? <span className="text-emerald-400 font-medium">{fmtNum(item.unbilled_views)}</span>
                             : <span className="text-muted-foreground/25">—</span>
                           }
+                        </td>
+
+                        {/* SLA state age */}
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          {item.state_age_hours != null ? (
+                            <span
+                              className={`tabular-nums text-xs font-medium ${URGENCY_CFG[item.urgency]?.ageCls ?? "text-muted-foreground/50"}`}
+                              title={nextSlaIn(item.inbox_category, item.state_age_hours) ?? "Maximale Eskalation"}
+                            >
+                              {fmtStateAge(item.state_age_hours)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/30">—</span>
+                          )}
                         </td>
 
                         {/* Last activity */}

@@ -11,6 +11,10 @@ import {
   FileText, RefreshCw, ExternalLink, X, ZoomIn,
 } from "lucide-react";
 import { describeAuditEntry, auditDotClass } from "@/lib/audit-describe";
+import {
+  assignCategory, stateStartAt, hoursElapsed, classifyUrgency,
+  URGENCY_CFG, fmtStateAge, nextSlaIn,
+} from "@/lib/urgency";
 
 interface ProofFile {
   id: string | null;
@@ -587,6 +591,68 @@ export default function ClipDetailPage() {
             </p>
           )}
         </div>
+
+        {/* ── SLA / Aging card ──────────────────────────────────── */}
+        {(() => {
+          const unbilledViews = Math.max(0,
+            (video.current_views ?? 0) - (video.views_at_last_invoice ?? 0)
+          );
+          const inboxCat = assignCategory({
+            is_flagged:          video.is_flagged,
+            proof_status:        video.proof_status,
+            proof_requested_at:  video.proof_requested_at,
+            discrepancy_status:  video.discrepancy_status,
+            verification_status: video.verification_status,
+            unbilled_views:      unbilledViews,
+          });
+          const stateAgeH = hoursElapsed(stateStartAt({
+            inbox_category:     inboxCat,
+            created_at:         video.created_at,
+            proof_requested_at: video.proof_requested_at,
+            proof_uploaded_at:  video.proof_uploaded_at,
+            last_activity_at:   video.reviewed_at ?? video.created_at,
+          }));
+          const urgency   = classifyUrgency(inboxCat, stateAgeH);
+          const urgCfg    = URGENCY_CFG[urgency];
+          const nextSla   = nextSlaIn(inboxCat, stateAgeH);
+          const clipAgeDays = video.created_at
+            ? Math.floor((Date.now() - new Date(video.created_at).getTime()) / 86_400_000)
+            : null;
+
+          return (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold">SLA &amp; Priorität</h2>
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${urgCfg.badge}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${urgCfg.dot}`} />
+                  {urgCfg.label}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Clip-Alter</p>
+                  <p className="font-medium tabular-nums">
+                    {clipAgeDays != null
+                      ? clipAgeDays === 1 ? "1 Tag" : clipAgeDays < 7 ? `${clipAgeDays} Tage` : `${Math.floor(clipAgeDays / 7)} Wo.`
+                      : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Im Status seit</p>
+                  <p className={`font-medium tabular-nums ${urgCfg.ageCls}`}>
+                    {fmtStateAge(stateAgeH)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Nächste Eskalation</p>
+                  <p className="text-xs text-muted-foreground">
+                    {nextSla ?? <span className="text-red-400 font-medium">Maximal eskaliert</span>}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Proof Section ──────────────────────────────────────── */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">

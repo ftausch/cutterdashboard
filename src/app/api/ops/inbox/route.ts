@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
+import {
+  stateStartAt, hoursElapsed, classifyUrgency, urgencyBonus,
+  type UrgencyLevel,
+} from '@/lib/urgency';
 
 async function dbQuery(sql: string, args: unknown[] = []) {
   const url   = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
@@ -93,13 +97,15 @@ export interface InboxItem {
   created_at:          string | null;
   last_activity_at:    string | null;
   inbox_category:      InboxCategory;
+  state_age_hours:     number;
+  urgency:             UrgencyLevel;
   priority_score:      number;
   suggested_action:    SuggestedAction;
 }
 
 // ── Category assignment ──────────────────────────────────────────────
 function assignCategory(
-  r: Omit<InboxItem, 'inbox_category' | 'priority_score' | 'suggested_action'>
+  r: Omit<InboxItem, 'inbox_category' | 'state_age_hours' | 'urgency' | 'priority_score' | 'suggested_action'>
 ): InboxCategory {
   // Flagged clips always go to blocked
   if (r.is_flagged) return 'blocked';
@@ -141,7 +147,7 @@ function assignCategory(
 
 // ── Priority score ───────────────────────────────────────────────────
 function calcPriority(
-  r: Omit<InboxItem, 'inbox_category' | 'priority_score' | 'suggested_action'>
+  r: Omit<InboxItem, 'inbox_category' | 'state_age_hours' | 'urgency' | 'priority_score' | 'suggested_action'>
 ): number {
   let s = 0;
 
@@ -175,7 +181,7 @@ function calcPriority(
 }
 
 // ── Suggested action ─────────────────────────────────────────────────
-function suggestAction(cat: InboxCategory, r: Omit<InboxItem, 'inbox_category' | 'priority_score' | 'suggested_action'>): SuggestedAction {
+function suggestAction(cat: InboxCategory, r: Omit<InboxItem, 'inbox_category' | 'state_age_hours' | 'urgency' | 'priority_score' | 'suggested_action'>): SuggestedAction {
   switch (cat) {
     case 'blocked':       return 'unflag';
     case 'critical':      return 'request_proof';
@@ -263,23 +269,35 @@ export async function GET(request: NextRequest) {
       last_activity_at:    val(row[17]),
     };
 
-    const inbox_category = assignCategory(base);
+    const inbox_category   = assignCategory(base);
+    const state_age_hours  = hoursElapsed(stateStartAt({
+      inbox_category,
+      created_at:         base.created_at,
+      proof_requested_at: base.proof_requested_at,
+      proof_uploaded_at:  base.proof_uploaded_at,
+      last_activity_at:   base.last_activity_at,
+    }));
+    const urgency = classifyUrgency(inbox_category, state_age_hours);
     return {
       ...base,
       inbox_category,
-      priority_score:   calcPriority(base),
+      state_age_hours,
+      urgency,
+      priority_score:   calcPriority(base) + urgencyBonus(urgency),
       suggested_action: suggestAction(inbox_category, base),
     };
   });
 
   // Summary counters
   const summary = {
-    total:         items.length,
-    critical:      items.filter(i => i.inbox_category === 'critical').length,
-    proof_waiting: items.filter(i => i.inbox_category === 'proof_waiting').length,
-    proof_overdue: items.filter(i => i.inbox_category === 'proof_overdue').length,
-    billing_ready: items.filter(i => i.inbox_category === 'billing_ready').length,
-    blocked:       items.filter(i => i.inbox_category === 'blocked').length,
+    total:          items.length,
+    critical:       items.filter(i => i.inbox_category === 'critical').length,
+    proof_waiting:  items.filter(i => i.inbox_category === 'proof_waiting').length,
+    proof_overdue:  items.filter(i => i.inbox_category === 'proof_overdue').length,
+    billing_ready:  items.filter(i => i.inbox_category === 'billing_ready').length,
+    blocked:        items.filter(i => i.inbox_category === 'blocked').length,
+    critical_delay: items.filter(i => i.urgency === 'critical_delay').length,
+    overdue:        items.filter(i => i.urgency === 'overdue').length,
   };
 
   // Per-category breakdown for tab badges

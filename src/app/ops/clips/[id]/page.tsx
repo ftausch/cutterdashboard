@@ -411,6 +411,10 @@ export default function ClipDetailPage() {
   const [rejectReason, setRejectReason] = useState("");
   const [showFlagInput, setShowFlagInput] = useState(false);
   const [showRejectInput, setShowRejectInput] = useState(false);
+  // Views the admin verified from the screenshot (pre-filled with claimed_views).
+  // Used by approve_proof + approve_and_verify to write the correct number to
+  // current_views / observed_views for billing.
+  const [correctedViews, setCorrectedViews] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -420,10 +424,18 @@ export default function ClipDetailPage() {
     if (res.status === 404) { router.push("/ops/clips"); return; }
     const json = await res.json();
     setData(json);
+    // Pre-fill with claimed_views so the admin only needs to type when correcting.
+    setCorrectedViews(json.video.claimed_views?.toString() ?? "");
     setLoading(false);
   }, [id, router]);
 
   useEffect(() => { load(); }, [load]);
+
+  /** Parsed correctedViews value — null when empty or invalid. */
+  function parsedCorrectedViews(): number | null {
+    const n = parseInt(correctedViews.replace(/\D/g, ""), 10);
+    return isNaN(n) || n <= 0 ? null : n;
+  }
 
   async function doAction(action: string, extra: Record<string, unknown> = {}) {
     setActionLoading(action);
@@ -722,10 +734,52 @@ export default function ClipDetailPage() {
                 </button>
               )}
 
+              {/* ── Views-Korrektur ──────────────────────────────── */}
+              {canApproveReject && (() => {
+                const claimed  = video.claimed_views ?? 0;
+                const parsed   = parsedCorrectedViews();
+                const isDiff   = parsed !== null && parsed !== claimed;
+                const isEmpty  = correctedViews.trim() === "";
+                return (
+                  <div className={`rounded-lg border p-3 space-y-2 ${isDiff ? "border-orange-500/30 bg-orange-500/5" : "border-border bg-muted/10"}`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Verifizierte Views <span className="text-muted-foreground/50">(aus Screenshot)</span>
+                      </p>
+                      {isDiff && (
+                        <span className="text-xs text-orange-400 font-medium">
+                          Angegeben: {new Intl.NumberFormat("de-DE").format(claimed)} → Korrigiert: {new Intl.NumberFormat("de-DE").format(parsed!)}
+                        </span>
+                      )}
+                      {!isDiff && !isEmpty && (
+                        <span className="text-xs text-emerald-400/70">✓ Stimmt überein</span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={correctedViews}
+                      onChange={e => setCorrectedViews(e.target.value.replace(/[^\d]/g, ""))}
+                      placeholder={claimed.toString()}
+                      className={`w-full rounded-md border bg-background px-3 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-1 ${
+                        isDiff
+                          ? "border-orange-500/40 focus:ring-orange-500/40 text-orange-300"
+                          : "border-input focus:ring-ring"
+                      }`}
+                    />
+                    <p className="text-xs text-muted-foreground/50">
+                      Dieser Wert wird als &quot;Beobachtet&quot; gespeichert und für die Abrechnung verwendet.
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* ★ One-click: approve + verify */}
               {canApproveReject && (
                 <button
-                  onClick={() => doAction("approve_and_verify")}
+                  onClick={() => doAction("approve_and_verify", {
+                    verified_views: parsedCorrectedViews() ?? undefined,
+                  })}
                   disabled={actionLoading !== null}
                   className="w-full rounded-lg bg-emerald-500 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors shadow-sm"
                 >
@@ -738,7 +792,9 @@ export default function ClipDetailPage() {
               {/* Approve proof only (manual_proof, not fully verified) */}
               {canApproveReject && (
                 <button
-                  onClick={() => doAction("approve_proof")}
+                  onClick={() => doAction("approve_proof", {
+                    verified_views: parsedCorrectedViews() ?? undefined,
+                  })}
                   disabled={actionLoading !== null}
                   className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/8 py-2 text-sm text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50 transition-colors"
                 >

@@ -93,21 +93,45 @@ export async function POST(
       );
       break;
 
-    case 'approve_proof':
-      await dbQuery(
-        `UPDATE cutter_videos
-         SET proof_status         = 'proof_approved',
-             proof_reviewer_id    = ?,
-             proof_reviewer_name  = ?,
-             proof_reviewed_at    = ?,
-             verification_status  = 'manual_proof'
-         WHERE id = ?`,
-        [auth.id, auth.name, now, id]
-      );
+    case 'approve_proof': {
+      // If the admin corrected the view count from the screenshot, write it to
+      // current_views + observed_views so billing uses the verified number.
+      const vv = typeof actionParams.verified_views === 'number' ? actionParams.verified_views : null;
+      if (vv !== null) {
+        await dbQuery(
+          `UPDATE cutter_videos
+           SET proof_status         = 'proof_approved',
+               proof_reviewer_id    = ?,
+               proof_reviewer_name  = ?,
+               proof_reviewed_at    = ?,
+               verification_status  = 'manual_proof',
+               current_views        = ?,
+               observed_views       = ?
+           WHERE id = ?`,
+          [auth.id, auth.name, now, vv, vv, id]
+        );
+      } else {
+        await dbQuery(
+          `UPDATE cutter_videos
+           SET proof_status         = 'proof_approved',
+               proof_reviewer_id    = ?,
+               proof_reviewer_name  = ?,
+               proof_reviewed_at    = ?,
+               verification_status  = 'manual_proof'
+           WHERE id = ?`,
+          [auth.id, auth.name, now, id]
+        );
+      }
       break;
+    }
 
-    case 'approve_and_verify':
-      // One-click: approve the proof AND mark the clip as fully verified.
+    case 'approve_and_verify': {
+      // One-click: approve proof AND mark as verified.
+      // current_views / observed_views are set to:
+      //   • verified_views (admin correction from screenshot), or
+      //   • claimed_views  (cutter's stated value, confirmed by admin)
+      // This ensures "Beobachtet" always reflects the verified number.
+      const vv = typeof actionParams.verified_views === 'number' ? actionParams.verified_views : null;
       await dbQuery(
         `UPDATE cutter_videos
          SET proof_status         = 'proof_approved',
@@ -116,11 +140,14 @@ export async function POST(
              proof_reviewed_at    = ?,
              verification_status  = 'verified',
              reviewed_by          = ?,
-             reviewed_at          = ?
+             reviewed_at          = ?,
+             current_views        = COALESCE(?, claimed_views),
+             observed_views       = COALESCE(?, claimed_views)
          WHERE id = ?`,
-        [auth.id, auth.name, now, auth.name, now, id]
+        [auth.id, auth.name, now, auth.name, now, vv, vv, id]
       );
       break;
+    }
 
     case 'reject_proof':
       await dbQuery(

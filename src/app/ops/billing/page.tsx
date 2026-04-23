@@ -2,115 +2,108 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
-import { RefreshCw, Receipt, AlertTriangle, CheckCircle2, Clock, Users } from "lucide-react";
+import {
+  RefreshCw, Receipt, Wallet, Settings2, Plus,
+  CheckCircle2, Clock, XCircle, FileCheck, FileOutput,
+} from "lucide-react";
 
-// ── Types ────────────────────────────────────────────────────────────
-interface CutterBilling {
+// ── Types ─────────────────────────────────────────────────────────────
+interface BatchSummary {
+  draft:     { count: number; amount: number };
+  reviewed:  { count: number; amount: number };
+  finalized: { count: number; amount: number };
+  exported:  { count: number; amount: number };
+  cancelled: { count: number; amount: number };
+}
+
+interface Batch {
   id: string;
-  name: string;
-  email: string;
-  rate_per_view: number;
+  cutter_id: string | null;
+  cutter_name: string | null;
+  period_start: string | null;
+  period_end:   string | null;
+  status: string;
+  rate_per_1k: number | null;
+  currency: string;
   total_clips: number;
-  verified_clips: number;
-  unbilled_views: number;
-  total_current_views: number;
-  pending_proof_count: number;
-  overdue_proof_count: number;
-  last_invoice_at: string | null;
-  estimated_amount: number;
-  is_ready: boolean;
-  is_blocked: boolean;
-}
-
-interface GrandTotal {
-  total_cutters: number;
-  ready_cutters: number;
-  total_unbilled: number;
+  total_billable_views: number;
   total_amount: number;
-  total_pending_proof: number;
+  created_by_name: string | null;
+  created_at: string | null;
+  finalized_at: string | null;
+  exported_at:  string | null;
+  cancelled_at: string | null;
 }
 
-interface BillingData {
-  cutters: CutterBilling[];
-  grandTotal: GrandTotal;
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-function formatNum(n: number): string {
+// ── Helpers ───────────────────────────────────────────────────────────
+function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return new Intl.NumberFormat("de-DE").format(n);
+  if (n >= 1_000)     return new Intl.NumberFormat("de-DE").format(n);
+  return String(n);
 }
-
-function formatEur(n: number): string {
-  return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(n);
+function eur(n: number): string {
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency", currency: "EUR", maximumFractionDigits: 2,
+  }).format(n);
 }
-
-function formatDate(iso: string | null): string {
+function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return new Date(iso).toLocaleDateString("de-DE", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  });
 }
 
-function formatRelativeDate(iso: string | null): string {
-  if (!iso) return "noch nie";
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days === 0) return "heute";
-  if (days === 1) return "gestern";
-  if (days < 30)  return `vor ${days}T`;
-  if (days < 60)  return "vor ~1 Monat";
-  return `vor ${Math.floor(days / 30)} Monaten`;
-}
+const STATUS_CFG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  draft:     { label: "Entwurf",     color: "text-muted-foreground border-border bg-muted/20",               icon: Clock       },
+  reviewed:  { label: "Geprüft",     color: "text-blue-400 border-blue-500/20 bg-blue-500/8",                icon: FileCheck   },
+  finalized: { label: "Abgeschlossen", color: "text-emerald-400 border-emerald-500/20 bg-emerald-500/8",     icon: CheckCircle2 },
+  exported:  { label: "Exportiert",  color: "text-purple-400 border-purple-500/20 bg-purple-500/8",          icon: FileOutput  },
+  cancelled: { label: "Storniert",   color: "text-red-400 border-red-500/20 bg-red-500/8",                   icon: XCircle     },
+};
 
-// ── Readiness badge ──────────────────────────────────────────────────
-function ReadinessBadge({ cutter }: { cutter: CutterBilling }) {
-  if (cutter.unbilled_views === 0) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/20 px-2 py-0.5 text-xs text-muted-foreground/50">
-        Kein Guthaben
-      </span>
-    );
-  }
-  if (cutter.is_blocked) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-yellow-500/20 bg-yellow-500/8 px-2 py-0.5 text-xs text-yellow-400">
-        <AlertTriangle className="h-3 w-3" />
-        {cutter.pending_proof_count} Beleg ausstehend
-      </span>
-    );
-  }
+function StatusBadge({ status }: { status: string }) {
+  const cfg = STATUS_CFG[status] ?? STATUS_CFG.draft;
+  const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/20 bg-emerald-500/8 px-2 py-0.5 text-xs text-emerald-400">
-      <CheckCircle2 className="h-3 w-3" />
-      Bereit
+    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium ${cfg.color}`}>
+      <Icon className="h-3 w-3" />
+      {cfg.label}
     </span>
   );
 }
 
-// ── Page ─────────────────────────────────────────────────────────────
-export default function BillingPrepPage() {
-  const router  = useRouter();
-  const [data,    setData]    = useState<BillingData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [filter,  setFilter]  = useState<"all" | "ready" | "blocked">("all");
+// ── Page ──────────────────────────────────────────────────────────────
+export default function BillingOverviewPage() {
+  const router = useRouter();
+  const [batches,  setBatches]  = useState<Batch[]>([]);
+  const [summary,  setSummary]  = useState<Partial<BatchSummary>>({});
+  const [loading,  setLoading]  = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   async function load() {
     setLoading(true);
-    const res = await fetch("/api/ops/billing-prep");
-    if (res.status === 401) { router.push("/login"); return; }
-    if (res.status === 403) { router.push("/dashboard"); return; }
-    setData(await res.json());
-    setLoading(false);
+    try {
+      const res = await fetch("/api/ops/billing/batches");
+      if (res.status === 401) { router.push("/login"); return; }
+      if (res.status === 403) { router.push("/dashboard"); return; }
+      const data = await res.json();
+      setBatches(data.batches ?? []);
+      setSummary(data.summary ?? {});
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, []);
 
-  const cutters = (data?.cutters ?? []).filter(c => {
-    if (filter === "ready")   return c.is_ready;
-    if (filter === "blocked") return c.is_blocked;
-    return true;
-  });
+  const visible = statusFilter === "all"
+    ? batches
+    : batches.filter(b => b.status === statusFilter);
 
-  const gt = data?.grandTotal;
+  const totalPending = (summary.draft?.count ?? 0) + (summary.reviewed?.count ?? 0);
+  const totalPendingAmt = (summary.draft?.amount ?? 0) + (summary.reviewed?.amount ?? 0);
 
   return (
     <>
@@ -118,70 +111,87 @@ export default function BillingPrepPage() {
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-6">
 
         {/* Header */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Abrechnungsvorbereitung</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Abrechnung</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Welche Cutter haben unabgerechnete Views — und wie viel ist fällig?
+              Übersicht aller Abrechnungs-Batches — erstellen, prüfen, finalisieren.
             </p>
           </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 transition-colors"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Aktualisieren
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={load}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 transition-colors"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Aktualisieren
+            </button>
+            <Link
+              href="/ops/billing/profiles"
+              className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Tarife
+            </Link>
+            <Link
+              href="/ops/billing/prepare"
+              className="flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Neuer Batch
+            </Link>
+          </div>
         </div>
 
-        {/* KPI summary */}
-        {gt && (
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div className="rounded-lg border border-border bg-card p-4">
-              <div className="mb-2 text-muted-foreground/40"><Users className="h-4 w-4" /></div>
-              <p className="text-2xl font-bold tabular-nums leading-none">{gt.ready_cutters}<span className="text-muted-foreground text-sm font-normal ml-1">/ {gt.total_cutters}</span></p>
-              <p className="mt-1.5 text-xs text-muted-foreground">Cutter bereit</p>
-            </div>
-            <div className="rounded-lg border border-emerald-500/20 bg-card p-4">
-              <div className="mb-2 text-emerald-400/40"><Receipt className="h-4 w-4" /></div>
-              <p className="text-2xl font-bold tabular-nums leading-none text-emerald-400">{formatNum(gt.total_unbilled)}</p>
-              <p className="mt-1.5 text-xs text-muted-foreground">Unabgerechnete Views</p>
-            </div>
-            <div className="rounded-lg border border-emerald-500/20 bg-card p-4">
-              <div className="mb-2 text-emerald-400/40"><Receipt className="h-4 w-4" /></div>
-              <p className="text-2xl font-bold tabular-nums leading-none text-emerald-400">{formatEur(gt.total_amount)}</p>
-              <p className="mt-1.5 text-xs text-muted-foreground">Geschätzter Gesamtbetrag</p>
-            </div>
-            {gt.total_pending_proof > 0 ? (
-              <div className="rounded-lg border border-yellow-500/20 bg-card p-4">
-                <div className="mb-2 text-yellow-400/40"><AlertTriangle className="h-4 w-4" /></div>
-                <p className="text-2xl font-bold tabular-nums leading-none text-yellow-400">{gt.total_pending_proof}</p>
-                <p className="mt-1.5 text-xs text-muted-foreground">Belege ausstehend (Blocker)</p>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="mb-2 text-muted-foreground/40"><CheckCircle2 className="h-4 w-4" /></div>
-                <p className="text-2xl font-bold tabular-nums leading-none text-emerald-400">0</p>
-                <p className="mt-1.5 text-xs text-muted-foreground">Keine Blocker</p>
-              </div>
-            )}
+        {/* KPI tiles */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 text-muted-foreground/40"><Wallet className="h-4 w-4" /></div>
+            <p className="text-2xl font-bold tabular-nums leading-none">{totalPending}</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Offene Batches</p>
           </div>
-        )}
+          <div className="rounded-lg border border-emerald-500/20 bg-card p-4">
+            <div className="mb-2 text-emerald-400/40"><Receipt className="h-4 w-4" /></div>
+            <p className="text-2xl font-bold tabular-nums leading-none text-emerald-400">{eur(totalPendingAmt)}</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Offener Betrag</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 text-muted-foreground/40"><CheckCircle2 className="h-4 w-4" /></div>
+            <p className="text-2xl font-bold tabular-nums leading-none">{summary.finalized?.count ?? 0}</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Finalisiert</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 text-muted-foreground/40"><FileOutput className="h-4 w-4" /></div>
+            <p className="text-2xl font-bold tabular-nums leading-none">{summary.exported?.count ?? 0}</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Exportiert</p>
+          </div>
+        </div>
 
-        {/* Filter tabs */}
-        <div className="flex gap-1 border-b border-border">
-          {(["all", "ready", "blocked"] as const).map(f => (
+        {/* Status filter tabs */}
+        <div className="flex gap-1 border-b border-border overflow-x-auto">
+          {[
+            { key: "all",       label: "Alle"          },
+            { key: "draft",     label: "Entwurf"       },
+            { key: "reviewed",  label: "Geprüft"       },
+            { key: "finalized", label: "Abgeschlossen" },
+            { key: "exported",  label: "Exportiert"    },
+            { key: "cancelled", label: "Storniert"     },
+          ].map(({ key, label }) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                filter === f
+              key={key}
+              onClick={() => setStatusFilter(key)}
+              className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                statusFilter === key
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground/60 hover:text-muted-foreground"
               }`}
             >
-              {f === "all" ? "Alle" : f === "ready" ? "Bereit" : "Ausstehend"}
+              {label}
+              {key !== "all" && summary[key as keyof BatchSummary]?.count
+                ? <span className="ml-1 text-xs text-muted-foreground/50">({summary[key as keyof BatchSummary]!.count})</span>
+                : null
+              }
             </button>
           ))}
         </div>
@@ -190,114 +200,61 @@ export default function BillingPrepPage() {
         {loading && (
           <div className="flex items-center justify-center py-20 text-muted-foreground/40 gap-2">
             <RefreshCw className="h-4 w-4 animate-spin" />
-            <span className="text-sm">Lade Abrechnungsdaten…</span>
+            <span className="text-sm">Lade Batches…</span>
           </div>
         )}
 
         {/* Table */}
         {!loading && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            {cutters.length === 0 ? (
-              <div className="flex flex-col items-center py-16 text-center gap-2">
-                <Receipt className="h-8 w-8 text-muted-foreground/15 mb-1" />
-                <p className="text-sm text-muted-foreground">Keine Cutter in dieser Ansicht.</p>
+            {visible.length === 0 ? (
+              <div className="flex flex-col items-center py-16 gap-3">
+                <Wallet className="h-8 w-8 text-muted-foreground/15" />
+                <p className="text-sm text-muted-foreground">Keine Batches in dieser Ansicht.</p>
+                <Link
+                  href="/ops/billing/prepare"
+                  className="mt-1 flex items-center gap-1.5 rounded-md bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Ersten Batch erstellen
+                </Link>
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="px-5 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Cutter</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Verifiziert</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Unabger. Views</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Rate</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Est. Betrag</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Letzte Rechnung</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Zeitraum</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Clips</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Abr. Views</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Betrag</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Erstellt</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {cutters.map(c => (
-                    <tr key={c.id} className={`hover:bg-accent/20 transition-colors ${c.unbilled_views === 0 ? "opacity-40" : ""}`}>
-                      <td className="px-5 py-3.5">
-                        <p className="font-medium">{c.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{c.email}</p>
+                  {visible.map(b => (
+                    <tr
+                      key={b.id}
+                      onClick={() => router.push(`/ops/billing/batches/${b.id}`)}
+                      className="hover:bg-accent/20 transition-colors cursor-pointer"
+                    >
+                      <td className="px-5 py-3.5 font-medium">{b.cutter_name ?? "—"}</td>
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">
+                        {b.period_start ? `${fmtDate(b.period_start)} – ${fmtDate(b.period_end)}` : "Kein Zeitraum"}
                       </td>
-                      <td className="px-4 py-3.5 text-right tabular-nums text-muted-foreground">
-                        {c.verified_clips}<span className="text-muted-foreground/40">/{c.total_clips}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-right tabular-nums">
-                        {c.unbilled_views > 0
-                          ? <span className="font-semibold text-foreground">{formatNum(c.unbilled_views)}</span>
-                          : <span className="text-muted-foreground/30">—</span>
-                        }
-                      </td>
-                      <td className="px-4 py-3.5 text-right tabular-nums text-muted-foreground text-xs">
-                        {c.rate_per_view > 0
-                          ? `€${c.rate_per_view.toFixed(4)}/View`
-                          : "—"
-                        }
-                      </td>
-                      <td className="px-4 py-3.5 text-right tabular-nums">
-                        {c.estimated_amount > 0
-                          ? <span className="font-semibold text-emerald-400">{formatEur(c.estimated_amount)}</span>
-                          : <span className="text-muted-foreground/30">—</span>
-                        }
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <span className="text-xs text-muted-foreground" title={formatDate(c.last_invoice_at)}>
-                          {formatRelativeDate(c.last_invoice_at)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <ReadinessBadge cutter={c} />
-                          {c.overdue_proof_count > 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-md border border-orange-500/20 bg-orange-500/8 px-2 py-0.5 text-xs text-orange-400">
-                              <Clock className="h-3 w-3" />
-                              {c.overdue_proof_count} überfällig
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                      <td className="px-4 py-3.5 text-right tabular-nums text-muted-foreground">{b.total_clips}</td>
+                      <td className="px-4 py-3.5 text-right tabular-nums">{fmt(b.total_billable_views)}</td>
+                      <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-emerald-400">{eur(b.total_amount)}</td>
+                      <td className="px-4 py-3.5"><StatusBadge status={b.status} /></td>
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">{fmtDate(b.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
-
-                {/* Grand total footer */}
-                {cutters.length > 1 && (
-                  <tfoot>
-                    <tr className="border-t-2 border-border bg-muted/10">
-                      <td className="px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Gesamt ({cutters.length} Cutter)
-                      </td>
-                      <td className="px-4 py-3" />
-                      <td className="px-4 py-3 text-right tabular-nums font-bold">
-                        {formatNum(cutters.reduce((s, c) => s + c.unbilled_views, 0))}
-                      </td>
-                      <td className="px-4 py-3" />
-                      <td className="px-4 py-3 text-right tabular-nums font-bold text-emerald-400">
-                        {formatEur(cutters.reduce((s, c) => s + c.estimated_amount, 0))}
-                      </td>
-                      <td className="px-4 py-3" />
-                      <td className="px-4 py-3">
-                        <span className="text-xs text-muted-foreground">
-                          {cutters.filter(c => c.is_ready).length} bereit · {cutters.filter(c => c.is_blocked).length} ausstehend
-                        </span>
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
               </table>
             )}
           </div>
         )}
-
-        {/* Note */}
-        <p className="text-xs text-muted-foreground/50">
-          Beträge sind Schätzungen basierend auf dem aktuellen Rate und unabgerechneten verifizierten Views.
-          Tatsächliche Rechnungsbeträge können abweichen (z.B. bei nachträglichen View-Korrekturen).
-          Rechnungen werden von den Cuttern selbst über ihre Rechnungsseite erstellt.
-        </p>
 
       </main>
     </>

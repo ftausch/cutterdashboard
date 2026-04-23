@@ -1,6 +1,6 @@
 /**
  * GET  /api/insights/:id/proofs — list proofs
- * POST /api/insights/:id/proofs — upload a screenshot
+ * POST /api/insights/:id/proofs — upload a screenshot (blocked when locked)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
@@ -41,14 +41,20 @@ function num(c: unknown): number | null {
   const v = val(c); if (!v) return null;
   const n = parseFloat(v); return isNaN(n) ? null : n;
 }
+function bool(c: unknown): boolean {
+  return num(c) !== 0;
+}
 
-async function checkOwnership(reportId: string, cutterId: string) {
+interface ReportState { status: string; isEditable: boolean; }
+
+async function checkOwnership(reportId: string, cutterId: string): Promise<ReportState | null> {
   const res = await dbQuery(
-    `SELECT status FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
+    `SELECT status, COALESCE(is_editable, 1) FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
     [reportId, cutterId]
   );
   if (!res.rows.length) return null;
-  return val((res.rows[0] as unknown[])[0]);
+  const row = res.rows[0] as unknown[];
+  return { status: val(row[0]) ?? 'draft', isEditable: bool(row[1]) };
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────
@@ -94,12 +100,20 @@ export async function POST(
   const auth = await requirePermission(request, 'PROOF_UPLOAD');
   if (!isCutter(auth)) return auth;
 
-  const { id } = await params;
-  const status = await checkOwnership(id, auth.id);
-  if (!status) {
+  const { id }  = await params;
+  const state   = await checkOwnership(id, auth.id);
+
+  if (!state) {
     return NextResponse.json({ error: 'Bericht nicht gefunden.' }, { status: 404 });
   }
-  if (status === 'approved') {
+  // ── Lock check (enforced server-side) ────────────────────────────────────
+  if (!state.isEditable) {
+    return NextResponse.json({
+      error: 'Dieser Bericht wurde vom Admin gesperrt. Screenshots können nicht hochgeladen werden.',
+      locked: true,
+    }, { status: 403 });
+  }
+  if (state.status === 'approved') {
     return NextResponse.json({ error: 'Genehmigte Berichte können nicht bearbeitet werden.' }, { status: 400 });
   }
 
@@ -140,7 +154,6 @@ export async function POST(
     [proofId, id, auth.id, storagePath, file.name, file.size, file.type, description ?? null, now]
   );
 
-  // Auto-transition from draft → draft (stays draft until submit)
   await dbQuery(
     `UPDATE monthly_insight_reports SET updated_at = ? WHERE id = ?`, [now, id]
   );

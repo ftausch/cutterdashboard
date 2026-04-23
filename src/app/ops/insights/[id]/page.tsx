@@ -6,7 +6,7 @@ import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
   ChevronLeft, RefreshCw, CheckCircle2, XCircle, Upload,
-  Eye, ImageIcon, X, Globe, User, FileText, BarChart2,
+  Eye, ImageIcon, X, Globe, User, BarChart2, Lock, Unlock,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -21,6 +21,11 @@ interface Report {
   cutter_note: string | null; admin_review_note: string | null;
   reviewed_by_name: string | null; reviewed_at: string | null;
   submitted_at: string | null; created_at: string | null; updated_at: string | null;
+  // lock fields
+  is_editable: boolean;
+  locked_at: string | null; locked_by_id: string | null; locked_by_name: string | null;
+  lock_reason: string | null;
+  unlocked_at: string | null; unlocked_by_id: string | null; unlocked_by_name: string | null;
 }
 interface Proof {
   id: string | null; signed_url: string | null; file_name: string | null;
@@ -41,11 +46,11 @@ const PLATFORMS: Record<string, string> = {
   youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", facebook: "Facebook",
 };
 
-const ACTION_CFG: { action: string; label: string; cls: string; icon: React.ElementType }[] = [
-  { action: "start_review",     label: "Prüfung starten",     cls: "border-border text-muted-foreground hover:border-purple-500/50 hover:text-purple-400", icon: Eye },
-  { action: "approve",          label: "Genehmigen",           cls: "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10",                       icon: CheckCircle2 },
-  { action: "request_reupload", label: "Neu hochladen anf.",   cls: "border-orange-500/30 text-orange-400 hover:bg-orange-500/10",                          icon: Upload },
-  { action: "reject",           label: "Ablehnen",             cls: "border-red-500/30 text-red-400 hover:bg-red-500/10",                                   icon: XCircle },
+const REVIEW_ACTIONS = [
+  { action: "start_review",     label: "Prüfung starten",    cls: "border-border text-muted-foreground hover:border-purple-500/50 hover:text-purple-400", icon: Eye },
+  { action: "approve",          label: "Genehmigen",          cls: "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10",                       icon: CheckCircle2 },
+  { action: "request_reupload", label: "Neu hochladen anf.",  cls: "border-orange-500/30 text-orange-400 hover:bg-orange-500/10",                          icon: Upload },
+  { action: "reject",           label: "Ablehnen",            cls: "border-red-500/30 text-red-400 hover:bg-red-500/10",                                   icon: XCircle },
 ];
 
 const fmtNum = new Intl.NumberFormat("de-DE");
@@ -83,6 +88,11 @@ export default function OpsInsightDetailPage() {
   const [noteInput,  setNoteInput]  = useState("");
   const [actionMsg,  setActionMsg]  = useState("");
 
+  // Lock controls
+  const [lockReason,  setLockReason]  = useState("");
+  const [lockBusy,    setLockBusy]    = useState(false);
+  const [showLockBox, setShowLockBox] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     const res = await fetch(`/api/ops/insights/${id}`);
@@ -91,6 +101,8 @@ export default function OpsInsightDetailPage() {
     setReport(json.report);
     setProofs(json.proofs ?? []);
     setNoteInput(json.report.admin_review_note ?? "");
+    setLockReason("");
+    setShowLockBox(false);
     setLoading(false);
   }, [id]);
 
@@ -107,6 +119,26 @@ export default function OpsInsightDetailPage() {
     if (res.ok) { setActionMsg(`Status: ${json.status}`); await load(); }
     else        { setActionMsg(json.error ?? "Fehler"); }
     setActionBusy(null);
+  }
+
+  async function doLock(lock: boolean) {
+    setLockBusy(true); setActionMsg("");
+    const res = await fetch(`/api/ops/insights/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: lock ? "lock" : "unlock",
+        reason: lock ? (lockReason || undefined) : undefined,
+      }),
+    });
+    const json = await res.json();
+    if (res.ok) {
+      setActionMsg(lock ? "Bearbeitung gesperrt." : "Bearbeitung freigegeben.");
+      await load();
+    } else {
+      setActionMsg(json.error ?? "Fehler");
+    }
+    setLockBusy(false);
   }
 
   if (loading) return (
@@ -126,9 +158,9 @@ export default function OpsInsightDetailPage() {
     </div>
   );
 
-  const cfg         = STATUS_CFG[report.status] ?? STATUS_CFG.draft;
-  const platLabel   = PLATFORMS[report.platform] ?? report.platform;
-  const follGrowth  = report.followers_start && report.followers_end
+  const cfg        = STATUS_CFG[report.status] ?? STATUS_CFG.draft;
+  const platLabel  = PLATFORMS[report.platform] ?? report.platform;
+  const follGrowth = report.followers_start && report.followers_end
     ? report.followers_end - report.followers_start : null;
 
   return (
@@ -168,6 +200,16 @@ export default function OpsInsightDetailPage() {
               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.badge}`}>
                 {cfg.label}
               </span>
+              {/* Edit lock badge */}
+              {report.is_editable ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2 py-0.5 text-[10px] font-medium text-emerald-500/70">
+                  Bearbeitbar
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-red-400">
+                  <Lock className="h-2.5 w-2.5" /> Gesperrt
+                </span>
+              )}
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">{report.cutter_email}</p>
           </div>
@@ -235,7 +277,7 @@ export default function OpsInsightDetailPage() {
           )}
         </div>
 
-        {/* Geo breakdown */}
+        {/* Geo */}
         {report.top_countries.length > 0 && (
           <div className="rounded-xl border border-border bg-card px-4 py-4">
             <div className="flex items-center gap-2 mb-3">
@@ -268,28 +310,122 @@ export default function OpsInsightDetailPage() {
           </div>
         )}
 
-        {/* Admin review panel */}
+        {/* ── Edit lock control panel ─────────────────────────────── */}
+        <div className={`rounded-xl border px-4 py-4 ${
+          report.is_editable
+            ? "border-border bg-card"
+            : "border-red-500/20 bg-red-500/[0.03]"
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              {report.is_editable
+                ? <Unlock className="h-4 w-4 text-emerald-500/70" />
+                : <Lock className="h-4 w-4 text-red-400" />}
+              <h2 className="text-sm font-semibold">Bearbeitungs-Sperre</h2>
+            </div>
+            <span className={`text-[10px] font-semibold rounded-full border px-2 py-0.5 ${
+              report.is_editable
+                ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-500/80"
+                : "border-red-500/30 bg-red-500/10 text-red-400"
+            }`}>
+              {report.is_editable ? "Freigegeben" : "Gesperrt"}
+            </span>
+          </div>
+
+          {/* Lock history */}
+          <div className="text-[11px] text-muted-foreground space-y-0.5 mb-4">
+            {report.locked_by_name && (
+              <p>
+                <span className="text-foreground/50">Gesperrt von:</span>{" "}
+                {report.locked_by_name}
+                {report.locked_at ? ` · ${fmtDate(report.locked_at)}` : ""}
+                {report.lock_reason ? ` — ${report.lock_reason}` : ""}
+              </p>
+            )}
+            {report.unlocked_by_name && (
+              <p>
+                <span className="text-foreground/50">Freigegeben von:</span>{" "}
+                {report.unlocked_by_name}
+                {report.unlocked_at ? ` · ${fmtDate(report.unlocked_at)}` : ""}
+              </p>
+            )}
+            {!report.locked_by_name && !report.unlocked_by_name && (
+              <p className="text-muted-foreground/50">Noch nie gesperrt.</p>
+            )}
+          </div>
+
+          {/* Lock action */}
+          {report.is_editable ? (
+            <div>
+              {showLockBox ? (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={lockReason}
+                    onChange={e => setLockReason(e.target.value)}
+                    placeholder="Grund (optional)…"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-red-500/30"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowLockBox(false)}
+                      className="flex-1 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Abbrechen
+                    </button>
+                    <button
+                      onClick={() => doLock(true)}
+                      disabled={lockBusy}
+                      className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                    >
+                      {lockBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Lock className="h-3 w-3" />}
+                      Sperren bestätigen
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLockBox(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/25 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <Lock className="h-3.5 w-3.5" /> Bearbeitung sperren
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => doLock(false)}
+              disabled={lockBusy}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-500/25 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50 transition-colors"
+            >
+              {lockBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Unlock className="h-3.5 w-3.5" />}
+              Bearbeitung freigeben
+            </button>
+          )}
+        </div>
+
+        {/* ── Admin review panel ──────────────────────────────────── */}
         <div className="rounded-xl border border-border bg-card px-4 py-4">
           <div className="flex items-center gap-2 mb-4">
             <BarChart2 className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Admin-Prüfung</h2>
+            <h2 className="text-sm font-semibold">Review-Entscheidung</h2>
           </div>
 
           <div className="mb-4">
             <label className="text-[11px] text-muted-foreground uppercase tracking-widest block mb-1.5">
-              Interne Notiz / Begründung
+              Notiz / Begründung (wird dem Cutter angezeigt)
             </label>
             <textarea
               value={noteInput}
               onChange={e => setNoteInput(e.target.value)}
               rows={2}
-              placeholder="Notiz zur Entscheidung (wird dem Cutter angezeigt)…"
+              placeholder="Notiz zur Entscheidung…"
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {ACTION_CFG.map(({ action, label, cls, icon: Icon }) => (
+            {REVIEW_ACTIONS.map(({ action, label, cls, icon: Icon }) => (
               <button
                 key={action}
                 onClick={() => doAction(action)}
@@ -308,7 +444,6 @@ export default function OpsInsightDetailPage() {
             <p className="mt-3 text-xs text-muted-foreground">{actionMsg}</p>
           )}
 
-          {/* Previous review */}
           {report.reviewed_by_name && (
             <div className="mt-4 pt-3 border-t border-border/50 text-[11px] text-muted-foreground space-y-0.5">
               <p><span className="text-foreground/60">Geprüft von:</span> {report.reviewed_by_name}</p>

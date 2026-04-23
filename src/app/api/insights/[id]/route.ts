@@ -1,12 +1,13 @@
 /**
- * GET   /api/insights/:id  — report detail (own only)
- * PATCH /api/insights/:id  — update draft fields
- * DELETE /api/insights/:id — delete draft
+ * GET    /api/insights/:id  — report detail (own only)
+ * PATCH  /api/insights/:id  — update draft fields (blocked when locked)
+ * DELETE /api/insights/:id  — delete draft (blocked when locked)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { getSignedUrl } from '@/lib/storage';
 
+// ── DB helpers ────────────────────────────────────────────────────────────
 async function dbQuery(sql: string, args: unknown[] = []) {
   const url   = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
   const token = process.env.TURSO_AUTH_TOKEN!;
@@ -33,6 +34,26 @@ async function dbQuery(sql: string, args: unknown[] = []) {
   return r?.response?.result ?? { rows: [], cols: [] };
 }
 
+/** Run ALTER TABLE safely — silently ignores "already has a column" errors. */
+async function dbAlter(sql: string) {
+  try { await dbQuery(sql); } catch (e) {
+    if (!(e instanceof Error) || !e.message.includes('already has a column')) throw e;
+  }
+}
+
+async function runLockMigration() {
+  await Promise.all([
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN is_editable INTEGER NOT NULL DEFAULT 1`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_at TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_by_id TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_by_name TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN lock_reason TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_at TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_by_id TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_by_name TEXT`),
+  ]);
+}
+
 function val(c: unknown): string | null {
   if (c == null) return null;
   return (c as { value: string | null }).value ?? null;
@@ -40,6 +61,9 @@ function val(c: unknown): string | null {
 function num(c: unknown): number | null {
   const v = val(c); if (!v) return null;
   const n = parseFloat(v); return isNaN(n) ? null : n;
+}
+function bool(c: unknown): boolean {
+  return num(c) !== 0;
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────
@@ -50,6 +74,8 @@ export async function GET(
   const auth = await requirePermission(request, 'PROOF_UPLOAD');
   if (!isCutter(auth)) return auth;
 
+  await runLockMigration();
+
   const { id } = await params;
 
   const [reportRes, proofsRes] = await Promise.all([
@@ -59,7 +85,8 @@ export async function GET(
               avg_watch_time_sec, followers_start, followers_end,
               top_countries, top_cities, cutter_note,
               admin_review_note, reviewed_by_name, reviewed_at,
-              submitted_at, created_at, updated_at
+              submitted_at, created_at, updated_at,
+              is_editable, locked_at, locked_by_name, lock_reason
        FROM monthly_insight_reports
        WHERE id = ? AND cutter_id = ?`,
       [id, auth.id]
@@ -101,9 +128,13 @@ export async function GET(
     submitted_at:      val(r[19]),
     created_at:        val(r[20]),
     updated_at:        val(r[21]),
+    // lock fields
+    is_editable:       bool(r[22]),
+    locked_at:         val(r[23]),
+    locked_by_name:    val(r[24]),
+    lock_reason:       val(r[25]),
   };
 
-  // Generate signed URLs for proofs
   const proofs = await Promise.all(
     (proofsRes.rows as unknown[][]).map(async f => {
       const path = val(f[1]);
@@ -138,15 +169,23 @@ export async function PATCH(
   const body   = await request.json() as Record<string, unknown>;
   const now    = new Date().toISOString();
 
-  // Verify ownership + editable status
   const existing = await dbQuery(
-    `SELECT status FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
+    `SELECT status, is_editable FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
     [id, auth.id]
   );
   if (!existing.rows.length) {
     return NextResponse.json({ error: 'Bericht nicht gefunden.' }, { status: 404 });
   }
-  const status = val((existing.rows[0] as unknown[])[0]);
+  const ex         = existing.rows[0] as unknown[];
+  const status     = val(ex[0]);
+  const isEditable = bool(ex[1]);
+
+  if (!isEditable) {
+    return NextResponse.json({
+      error: 'Dieser Bericht wurde vom Admin gesperrt und kann nicht bearbeitet werden.',
+      locked: true,
+    }, { status: 403 });
+  }
   if (status === 'approved') {
     return NextResponse.json({ error: 'Genehmigte Berichte können nicht bearbeitet werden.' }, { status: 400 });
   }
@@ -196,13 +235,22 @@ export async function DELETE(
   const { id } = await params;
 
   const existing = await dbQuery(
-    `SELECT status FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
+    `SELECT status, is_editable FROM monthly_insight_reports WHERE id = ? AND cutter_id = ?`,
     [id, auth.id]
   );
   if (!existing.rows.length) {
     return NextResponse.json({ error: 'Bericht nicht gefunden.' }, { status: 404 });
   }
-  const status = val((existing.rows[0] as unknown[])[0]);
+  const ex         = existing.rows[0] as unknown[];
+  const status     = val(ex[0]);
+  const isEditable = bool(ex[1]);
+
+  if (!isEditable) {
+    return NextResponse.json({
+      error: 'Dieser Bericht wurde vom Admin gesperrt und kann nicht gelöscht werden.',
+      locked: true,
+    }, { status: 403 });
+  }
   if (!['draft', 'reupload_requested'].includes(status ?? '')) {
     return NextResponse.json({ error: 'Nur Entwürfe können gelöscht werden.' }, { status: 400 });
   }

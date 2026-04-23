@@ -1,12 +1,16 @@
 /**
  * GET   /api/ops/insights/:id  — admin detail view (any cutter)
- * PATCH /api/ops/insights/:id  — admin review action
+ * PATCH /api/ops/insights/:id  — admin review action OR lock/unlock
+ *
+ * Review actions: approve | reject | request_reupload | start_review
+ * Lock actions:   lock | unlock
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
 import { getSignedUrl } from '@/lib/storage';
 import { randomUUID } from 'crypto';
 
+// ── DB helpers ────────────────────────────────────────────────────────────
 async function dbQuery(sql: string, args: unknown[] = []) {
   const url   = process.env.TURSO_DATABASE_URL!.replace('libsql://', 'https://');
   const token = process.env.TURSO_AUTH_TOKEN!;
@@ -33,6 +37,25 @@ async function dbQuery(sql: string, args: unknown[] = []) {
   return r?.response?.result ?? { rows: [], cols: [] };
 }
 
+async function dbAlter(sql: string) {
+  try { await dbQuery(sql); } catch (e) {
+    if (!(e instanceof Error) || !e.message.includes('already has a column')) throw e;
+  }
+}
+
+async function runLockMigration() {
+  await Promise.all([
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN is_editable INTEGER NOT NULL DEFAULT 1`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_at TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_by_id TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN locked_by_name TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN lock_reason TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_at TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_by_id TEXT`),
+    dbAlter(`ALTER TABLE monthly_insight_reports ADD COLUMN unlocked_by_name TEXT`),
+  ]);
+}
+
 function val(c: unknown): string | null {
   if (c == null) return null;
   return (c as { value: string | null }).value ?? null;
@@ -40,6 +63,9 @@ function val(c: unknown): string | null {
 function num(c: unknown): number | null {
   const v = val(c); if (!v) return null;
   const n = parseFloat(v); return isNaN(n) ? null : n;
+}
+function bool(c: unknown): boolean {
+  return num(c) !== 0;
 }
 
 // ── GET ───────────────────────────────────────────────────────────────────
@@ -49,6 +75,8 @@ export async function GET(
 ) {
   const auth = await requirePermission(request, 'OPS_READ');
   if (!isCutter(auth)) return auth;
+
+  await runLockMigration();
 
   const { id } = await params;
 
@@ -60,7 +88,10 @@ export async function GET(
               r.avg_watch_time_sec, r.followers_start, r.followers_end,
               r.top_countries, r.top_cities, r.cutter_note,
               r.admin_review_note, r.reviewed_by_id, r.reviewed_by_name, r.reviewed_at,
-              r.submitted_at, r.created_at, r.updated_at
+              r.submitted_at, r.created_at, r.updated_at,
+              COALESCE(r.is_editable, 1) AS is_editable,
+              r.locked_at, r.locked_by_id, r.locked_by_name, r.lock_reason,
+              r.unlocked_at, r.unlocked_by_id, r.unlocked_by_name
        FROM monthly_insight_reports r
        JOIN cutters c ON c.id = r.cutter_id
        WHERE r.id = ?`,
@@ -104,6 +135,15 @@ export async function GET(
     submitted_at:      val(r[22]),
     created_at:        val(r[23]),
     updated_at:        val(r[24]),
+    // lock state
+    is_editable:       bool(r[25]),
+    locked_at:         val(r[26]),
+    locked_by_id:      val(r[27]),
+    locked_by_name:    val(r[28]),
+    lock_reason:       val(r[29]),
+    unlocked_at:       val(r[30]),
+    unlocked_by_id:    val(r[31]),
+    unlocked_by_name:  val(r[32]),
   };
 
   const proofs = await Promise.all(
@@ -123,7 +163,6 @@ export async function GET(
 }
 
 // ── PATCH ─────────────────────────────────────────────────────────────────
-// Actions: approve | reject | request_reupload | start_review
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -132,9 +171,64 @@ export async function PATCH(
   if (!isCutter(auth)) return auth;
 
   const { id } = await params;
-  const body   = await request.json() as { action: string; note?: string };
+  const body   = await request.json() as { action: string; note?: string; reason?: string };
   const now    = new Date().toISOString();
 
+  const existing = await dbQuery(
+    `SELECT id FROM monthly_insight_reports WHERE id = ?`, [id]
+  );
+  if (!existing.rows.length) {
+    return NextResponse.json({ error: 'Bericht nicht gefunden.' }, { status: 404 });
+  }
+
+  // ── Lock / unlock actions ─────────────────────────────────────────────────
+  if (body.action === 'lock') {
+    await dbQuery(
+      `UPDATE monthly_insight_reports
+       SET is_editable     = 0,
+           locked_at       = ?,
+           locked_by_id    = ?,
+           locked_by_name  = ?,
+           lock_reason     = ?,
+           unlocked_at     = NULL,
+           unlocked_by_id  = NULL,
+           unlocked_by_name = NULL,
+           updated_at      = ?
+       WHERE id = ?`,
+      [now, auth.id, auth.name, body.reason ?? null, now, id]
+    );
+
+    await dbQuery(
+      `INSERT INTO audit_log (id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at)
+       VALUES (?, ?, ?, 'insight.lock', 'monthly_insight_report', ?, ?, ?)`,
+      [randomUUID(), auth.id, auth.name, id, JSON.stringify({ reason: body.reason ?? null }), now]
+    ).catch(() => {});
+
+    return NextResponse.json({ success: true, is_editable: false });
+  }
+
+  if (body.action === 'unlock') {
+    await dbQuery(
+      `UPDATE monthly_insight_reports
+       SET is_editable       = 1,
+           unlocked_at       = ?,
+           unlocked_by_id    = ?,
+           unlocked_by_name  = ?,
+           updated_at        = ?
+       WHERE id = ?`,
+      [now, auth.id, auth.name, now, id]
+    );
+
+    await dbQuery(
+      `INSERT INTO audit_log (id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at)
+       VALUES (?, ?, ?, 'insight.unlock', 'monthly_insight_report', ?, ?, ?)`,
+      [randomUUID(), auth.id, auth.name, id, JSON.stringify({ by: auth.name }), now]
+    ).catch(() => {});
+
+    return NextResponse.json({ success: true, is_editable: true });
+  }
+
+  // ── Review status actions ─────────────────────────────────────────────────
   const ACTION_STATUS: Record<string, string> = {
     approve:          'approved',
     reject:           'rejected',
@@ -147,14 +241,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'Ungültige Aktion.' }, { status: 400 });
   }
 
-  const existing = await dbQuery(
-    `SELECT id FROM monthly_insight_reports WHERE id = ?`, [id]
-  );
-  if (!existing.rows.length) {
-    return NextResponse.json({ error: 'Bericht nicht gefunden.' }, { status: 404 });
-  }
-
-  // Write audit log
   await dbQuery(
     `INSERT INTO audit_log (id, actor_id, actor_name, action, entity_type, entity_id, meta, created_at)
      VALUES (?, ?, ?, ?, 'monthly_insight_report', ?, ?, ?)`,
@@ -164,7 +250,7 @@ export async function PATCH(
       JSON.stringify({ note: body.note ?? null }),
       now,
     ]
-  ).catch(() => { /* audit_log may not exist yet — non-blocking */ });
+  ).catch(() => {});
 
   await dbQuery(
     `UPDATE monthly_insight_reports

@@ -8,7 +8,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import {
   Scissors, ChevronDown, User, Receipt, Link2,
   ShieldCheck, List, Bell, BarChart2, Settings, LogOut,
-  Menu, X, Home, Video, TrendingUp, BookOpen, ListChecks, Wallet, Inbox,
+  Menu, X, Home, Video, TrendingUp, BookOpen, ListChecks, Wallet, Inbox, ClipboardCheck,
 } from "lucide-react";
 
 interface CutterSession {
@@ -51,7 +51,8 @@ const SECONDARY_NAV: SecondaryItem[] = [
   { href: "/ops/clips",     label: "Clips",      icon: List,        match: (p) => p.startsWith("/ops/clips"),     opsOnly: true },
   { href: "/ops/alerts",    label: "Alerts",     icon: Bell,        match: (p) => p.startsWith("/ops/alerts"),    opsOnly: true },
   { href: "/ops/analytics", label: "Analytics",  icon: BarChart2,   match: (p) => p.startsWith("/ops/analytics"), opsOnly: true },
-  { href: "/ops/billing",   label: "Abrechnung", icon: Wallet,      match: (p) => p.startsWith("/ops/billing"),   opsOnly: true },
+  { href: "/ops/billing",   label: "Abrechnung", icon: Wallet,          match: (p) => p.startsWith("/ops/billing"),   opsOnly: true },
+  { href: "/ops/audits",   label: "Audits",     icon: ClipboardCheck,  match: (p) => p.startsWith("/ops/audits"),    opsOnly: true },
   { href: "/admin",         label: "Admin",      icon: Settings,    match: (p) => p.startsWith("/admin"),         adminOnly: true },
 ];
 

@@ -222,10 +222,9 @@ export async function POST(request: NextRequest) {
   const clipRes = await dbQuery(
     `SELECT v.id, v.platform, v.url, v.title,
             CASE
-              WHEN v.proof_status = 'proof_approved'
-                THEN COALESCE(v.observed_views, v.current_views, 0)
-              WHEN v.verification_status = 'verified'
-                THEN COALESCE(v.current_views, 0)
+              WHEN v.proof_status IN ('proof_approved')
+                OR  v.verification_status IN ('verified', 'manual_proof')
+                THEN COALESCE(v.observed_views, v.current_views, v.claimed_views, 0)
               ELSE 0
             END AS verified_views,
             COALESCE(v.views_at_last_invoice, 0) AS billed_baseline

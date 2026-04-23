@@ -2,13 +2,22 @@
  * GET /api/ops/billing/eligible — eligible clips for a cutter in a billing period
  *
  * Eligibility rules:
- *   1. verified_views > COALESCE(views_at_last_invoice, 0)
- *   2. is_flagged = 0
- *   3. billing_status NOT IN ('included_in_batch', 'invoiced')
+ *   1. clip has a verified view count  > 0  (verified_views, see CASE below)
+ *   2. verified_views > COALESCE(views_at_last_invoice, 0)   (billable delta)
+ *   3. COALESCE(is_flagged, 0) = 0
+ *   4. billing_status NOT IN ('included_in_batch', 'invoiced')
  *
- * verified_views:
- *   proof_approved → COALESCE(observed_views, current_views)
- *   verification 'verified' → current_views
+ * verified_views resolution order (intentionally generous to cover all
+ * legacy verification paths):
+ *   proof_approved  → COALESCE(observed_views, current_views, claimed_views, 0)
+ *   verified        → COALESCE(observed_views, current_views, claimed_views, 0)
+ *   manual_proof    → COALESCE(observed_views, current_views, claimed_views, 0)
+ *
+ * Rationale for including claimed_views:
+ *   Many older clips were verified via the admin "approve" or "set_verified"
+ *   actions which set verification_status but did NOT copy views into
+ *   current_views / observed_views.  claimed_views was always set by the
+ *   cutter and is the only view figure available for those clips.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePermission, isCutter } from '@/lib/cutter/middleware';
@@ -21,9 +30,9 @@ async function dbQuery(sql: string, args: unknown[] = []) {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       requests: [{ type: 'execute', stmt: { sql, args: args.map(a =>
-        a === null                   ? { type: 'null' } :
-        typeof a === 'number' && !Number.isInteger(a) ? { type: 'real', value: String(a) } :
-        typeof a === 'number'        ? { type: 'integer', value: String(a) } :
+        a === null                                      ? { type: 'null' } :
+        typeof a === 'number' && !Number.isInteger(a)  ? { type: 'real',    value: String(a) } :
+        typeof a === 'number'                          ? { type: 'integer', value: String(a) } :
         { type: 'text', value: String(a) }
       )}}, { type: 'close' }],
     }),
@@ -82,7 +91,12 @@ export async function GET(request: NextRequest) {
     extraArgs.push(period_end);
   }
 
-  // SQLite HAVING lets us filter on the computed verified_views alias
+  // ── Eligible clips ────────────────────────────────────────────────────
+  // verified_views uses a three-level COALESCE so that legacy clips verified
+  // without an observed_views update still surface via claimed_views.
+  //
+  // COALESCE(is_flagged, 0) = 0  ← NULL-safe: old rows where column was never
+  // set must not be excluded.
   const result = await dbQuery(
     `SELECT
        v.id,
@@ -91,20 +105,21 @@ export async function GET(request: NextRequest) {
        v.title,
        v.verification_status,
        v.proof_status,
-       COALESCE(v.current_views, 0)                              AS current_views,
+       COALESCE(v.current_views, v.claimed_views, 0)              AS current_views,
        CASE
-         WHEN v.proof_status = 'proof_approved'
-           THEN COALESCE(v.observed_views, v.current_views, 0)
-         WHEN v.verification_status = 'verified'
-           THEN COALESCE(v.current_views, 0)
+         WHEN v.proof_status IN ('proof_approved')
+           OR  v.verification_status IN ('verified', 'manual_proof')
+           THEN COALESCE(v.observed_views, v.current_views, v.claimed_views, 0)
          ELSE 0
-       END                                                        AS verified_views,
-       COALESCE(v.views_at_last_invoice, 0)                      AS billed_baseline,
-       COALESCE(v.published_at, v.created_at)                    AS clip_date,
-       v.created_at
+       END                                                          AS verified_views,
+       COALESCE(v.views_at_last_invoice, 0)                        AS billed_baseline,
+       COALESCE(v.published_at, v.created_at)                      AS clip_date,
+       v.created_at,
+       v.claimed_views,
+       v.observed_views
      FROM cutter_videos v
      WHERE v.cutter_id = ?
-       AND v.is_flagged = 0
+       AND COALESCE(v.is_flagged, 0) = 0
        AND (v.billing_status IS NULL OR v.billing_status NOT IN ('included_in_batch', 'invoiced'))
        ${dateClause}
      HAVING verified_views > billed_baseline
@@ -129,6 +144,8 @@ export async function GET(request: NextRequest) {
       billable_views:      verifiedViews - billedBaseline,
       clip_date:           val(r[9]),
       created_at:          val(r[10]),
+      claimed_views:       num(r[11]),
+      observed_views:      num(r[12]),
     };
   });
 

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { CutterNav } from "@/components/cutter-nav";
 import {
   RefreshCw, ChevronLeft, ChevronRight, CheckCircle2,
-  AlertTriangle, Eye, Receipt,
+  AlertTriangle, Eye, Receipt, Info, XCircle,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -29,7 +29,36 @@ interface EligibleClip {
   verified_views: number;
   billed_baseline: number;
   billable_views: number;
+  claimed_views: number | null;
+  observed_views: number | null;
   clip_date: string | null;
+}
+
+interface DiagClip {
+  id: string;
+  platform: string | null;
+  title: string | null;
+  verification_status: string | null;
+  proof_status: string | null;
+  claimed_views: number | null;
+  current_views: number | null;
+  observed_views: number | null;
+  verified_views: number;
+  billed_baseline: number;
+  billing_status: string | null;
+  is_flagged: boolean;
+  reason: string;
+  is_eligible: boolean;
+  billable_views: number;
+  amount: number;
+}
+
+interface DiagSummary {
+  total: number;
+  eligible: number;
+  total_billable_views: number;
+  estimated_amount: number;
+  reasons: Record<string, number>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -60,6 +89,16 @@ function PlatformBadge({ p }: { p: string | null }) {
     </span>
   );
 }
+
+const REASON_LABELS: Record<string, { label: string; color: string }> = {
+  not_verified:      { label: "Nicht verifiziert",        color: "text-yellow-400" },
+  no_views:          { label: "Keine Views",              color: "text-orange-400" },
+  already_billed:    { label: "Bereits abgerechnet",      color: "text-muted-foreground" },
+  included_in_batch: { label: "Im laufenden Batch",       color: "text-blue-400" },
+  flagged:           { label: "Markiert / gesperrt",      color: "text-red-400" },
+  already_invoiced:  { label: "Bereits in Rechnung",      color: "text-muted-foreground" },
+  eligible:          { label: "Fällig",                   color: "text-emerald-400" },
+};
 
 // ── Step indicator ─────────────────────────────────────────────────────
 function Steps({ step }: { step: number }) {
@@ -94,6 +133,162 @@ function Steps({ step }: { step: number }) {
   );
 }
 
+// ── Diagnostics panel ─────────────────────────────────────────────────
+function DiagnosticsPanel({
+  cutterId, cutterName,
+}: {
+  cutterId: string;
+  cutterName: string;
+}) {
+  const [diag, setDiag]       = useState<{ clips: DiagClip[]; summary: DiagSummary; has_profile: boolean; rate_per_1k: number | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen]       = useState(false);
+  const [filter, setFilter]   = useState<string>("all");
+
+  async function load() {
+    setLoading(true);
+    const res = await fetch(`/api/ops/billing/diagnostics?cutter_id=${cutterId}`);
+    setLoading(false);
+    if (!res.ok) return;
+    setDiag(await res.json());
+  }
+
+  function toggle() {
+    if (!open && !diag) load();
+    setOpen(p => !p);
+  }
+
+  const filtered = !diag ? [] :
+    filter === "all"       ? diag.clips :
+    filter === "eligible"  ? diag.clips.filter(c => c.is_eligible) :
+    diag.clips.filter(c => c.reason === filter);
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Info className="h-3.5 w-3.5" />
+        {open ? "Diagnose ausblenden" : `Diagnose: Warum sind Clips (nicht) fällig?`}
+        {diag && (
+          <span className="ml-1 text-emerald-400">
+            {diag.summary.eligible} fällig / {diag.summary.total} gesamt
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="mt-3 rounded-xl border border-border bg-card/50 p-4 space-y-3">
+          {loading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Analysiere Clips…
+            </div>
+          )}
+
+          {diag && (
+            <>
+              {/* Reason breakdown */}
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(diag.summary.reasons).map(([reason, count]) => {
+                  const cfg = REASON_LABELS[reason] ?? { label: reason, color: "text-muted-foreground" };
+                  return (
+                    <button
+                      key={reason}
+                      onClick={() => setFilter(prev => prev === reason ? "all" : reason)}
+                      className={`flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs transition-colors ${
+                        filter === reason ? "bg-accent" : "hover:bg-accent/50"
+                      }`}
+                    >
+                      <span className={cfg.color}>{count}</span>
+                      <span className="text-muted-foreground">{cfg.label}</span>
+                    </button>
+                  );
+                })}
+                {filter !== "all" && (
+                  <button
+                    onClick={() => setFilter("all")}
+                    className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
+                  >
+                    Alle zeigen
+                  </button>
+                )}
+              </div>
+
+              {/* Clip table */}
+              <div className="overflow-hidden rounded-lg border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Clip</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Beansprucht</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Verifiziert</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Abger.</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Fällig</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Grund</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {filtered.slice(0, 50).map(c => {
+                      const reasonCfg = REASON_LABELS[c.reason] ?? { label: c.reason, color: "text-muted-foreground" };
+                      return (
+                        <tr key={c.id} className={c.is_eligible ? "" : "opacity-50"}>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <PlatformBadge p={c.platform} />
+                              <span className="line-clamp-1 max-w-[180px]">{c.title ?? "Kein Titel"}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground/70">
+                            {c.verification_status ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {c.claimed_views != null ? fmt(c.claimed_views) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {c.verified_views > 0 ? fmt(c.verified_views) : <span className="text-muted-foreground/40">0</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {c.billed_baseline > 0 ? fmt(c.billed_baseline) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium">
+                            {c.billable_views > 0
+                              ? <span className="text-emerald-400">{fmt(c.billable_views)}</span>
+                              : <span className="text-muted-foreground/40">—</span>
+                            }
+                          </td>
+                          <td className={`px-3 py-2 font-medium ${reasonCfg.color}`}>
+                            {reasonCfg.label}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filtered.length > 50 && (
+                  <p className="px-3 py-2 text-xs text-muted-foreground/50 border-t border-border">
+                    … und {filtered.length - 50} weitere
+                  </p>
+                )}
+              </div>
+
+              {!diag.has_profile && (
+                <div className="flex items-center gap-2 text-xs text-yellow-400">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Kein Abrechnungstarif. Bitte zuerst einen Tarif anlegen.{" "}
+                  <Link href="/ops/billing/profiles" className="underline">Tarife →</Link>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────
 export default function BillingPreparePage() {
   const router = useRouter();
@@ -113,7 +308,7 @@ export default function BillingPreparePage() {
   const [ratePer1k,    setRatePer1k]   = useState<number | null>(null);
   const [currency,     setCurrency]    = useState("EUR");
 
-  // Step 3 / general
+  // General
   const [step,    setStep]    = useState(1);
   const [creating, setCreating] = useState(false);
   const [error,    setError]   = useState<string | null>(null);
@@ -164,13 +359,12 @@ export default function BillingPreparePage() {
     setClips(data.clips ?? []);
     setSelectedIds(new Set((data.clips ?? []).map((c: EligibleClip) => c.id)));
 
-    // Get rate from selected cutter
     const cutter = cutters.find(c => c.id === cutterId);
     setRatePer1k(cutter?.rate_per_1k ?? null);
     setCurrency(cutter?.currency ?? "EUR");
   }
 
-  // Step 2 → Step 3 (create batch)
+  // Step 2 → Create batch
   async function createBatch() {
     if (selectedIds.size === 0) { setError("Mindestens ein Clip muss ausgewählt sein."); return; }
     setError(null);
@@ -198,7 +392,6 @@ export default function BillingPreparePage() {
     router.push(`/ops/billing/batches/${data.id}`);
   }
 
-  // Toggle all
   function toggleAll() {
     if (selectedIds.size === clips.length) {
       setSelectedIds(new Set());
@@ -213,11 +406,10 @@ export default function BillingPreparePage() {
     setSelectedIds(next);
   }
 
-  // Estimated amount for selected clips
-  const selectedClips    = clips.filter(c => selectedIds.has(c.id));
-  const totalBillViews   = selectedClips.reduce((s, c) => s + c.billable_views, 0);
-  const estimatedAmount  = ratePer1k != null ? (totalBillViews / 1000) * ratePer1k : null;
-  const selectedCutter   = cutters.find(c => c.id === cutterId);
+  const selectedClips   = clips.filter(c => selectedIds.has(c.id));
+  const totalBillViews  = selectedClips.reduce((s, c) => s + c.billable_views, 0);
+  const estimatedAmount = ratePer1k != null ? (totalBillViews / 1000) * ratePer1k : null;
+  const selectedCutter  = cutters.find(c => c.id === cutterId);
 
   return (
     <>
@@ -280,6 +472,14 @@ export default function BillingPreparePage() {
                     </p>
                   )}
                 </div>
+
+                {/* Diagnostics for selected cutter */}
+                {cutterId && selectedCutter?.has_profile && (
+                  <DiagnosticsPanel
+                    cutterId={cutterId}
+                    cutterName={selectedCutter.name}
+                  />
+                )}
 
                 {/* Period */}
                 <div className="grid grid-cols-2 gap-4">
@@ -362,14 +562,14 @@ export default function BillingPreparePage() {
                 )}
               </div>
               <button
-                onClick={() => { setStep(1); setClips([]); setSelectedIds(new Set()); }}
+                onClick={() => { setStep(1); setClips([]); setSelectedIds(new Set()); setClipError(null); }}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 ← Zurück
               </button>
             </div>
 
-            {/* Loading clips */}
+            {/* Loading */}
             {loadingClips && (
               <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground/40">
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -385,12 +585,22 @@ export default function BillingPreparePage() {
             )}
 
             {!loadingClips && !clipError && clips.length === 0 && (
-              <div className="flex flex-col items-center py-16 gap-2 text-center">
-                <Eye className="h-8 w-8 text-muted-foreground/15" />
-                <p className="text-sm text-muted-foreground">Keine fälligen Clips für diesen Cutter.</p>
-                <p className="text-xs text-muted-foreground/60">
-                  Clips sind fällig wenn: verifizierte Views {'>'} bereits abgerechnete Views.
-                </p>
+              <div className="rounded-xl border border-border bg-card px-6 py-10 space-y-4">
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <XCircle className="h-8 w-8 text-muted-foreground/15" />
+                  <p className="text-sm font-medium">Keine fälligen Clips für diesen Cutter.</p>
+                  <p className="text-xs text-muted-foreground/60 max-w-sm">
+                    Clips sind fällig wenn sie verifiziert sind (oder eine genehmigte Beleg haben)
+                    und ihre verifizierten Views die bereits abgerechneten Views übersteigen.
+                  </p>
+                </div>
+                {/* Show diagnostics inline when no eligible clips */}
+                {selectedCutter && (
+                  <DiagnosticsPanel
+                    cutterId={selectedCutter.id}
+                    cutterName={selectedCutter.name}
+                  />
+                )}
               </div>
             )}
 
@@ -455,7 +665,11 @@ export default function BillingPreparePage() {
                               <p className="text-xs text-muted-foreground mt-0.5">{fmtDate(c.clip_date)}</p>
                             </td>
                             <td className="px-4 py-3"><PlatformBadge p={c.platform} /></td>
-                            <td className="px-4 py-3 text-right tabular-nums text-sm">{fmt(c.verified_views)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums text-sm">
+                              <span title={`Beansprucht: ${c.claimed_views ?? "—"} · Beobachtet: ${c.observed_views ?? "—"} · API: ${c.current_views}`}>
+                                {fmt(c.verified_views)}
+                              </span>
+                            </td>
                             <td className="px-4 py-3 text-right tabular-nums text-sm text-muted-foreground">{fmt(c.billed_baseline)}</td>
                             <td className="px-4 py-3 text-right tabular-nums text-sm font-semibold">{fmt(c.billable_views)}</td>
                             <td className="px-4 py-3 text-right tabular-nums text-sm text-emerald-400">
@@ -465,7 +679,6 @@ export default function BillingPreparePage() {
                         );
                       })}
                     </tbody>
-                    {/* Footer totals */}
                     {selectedIds.size > 0 && (
                       <tfoot>
                         <tr className="border-t-2 border-border bg-muted/10">
@@ -480,6 +693,18 @@ export default function BillingPreparePage() {
                       </tfoot>
                     )}
                   </table>
+                </div>
+
+                {/* Diagnostic hint */}
+                <div className="flex items-start gap-2 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    Nur Clips mit verifizierten Views werden angezeigt.
+                    Hover über &quot;Verif. Views&quot; um beanspruchte vs. beobachtete Werte zu sehen.
+                    {selectedCutter && (
+                      <> <DiagnosticsInline cutterId={selectedCutter.id} cutterName={selectedCutter.name} /></>
+                    )}
+                  </span>
                 </div>
 
                 {error && (
@@ -513,6 +738,27 @@ export default function BillingPreparePage() {
         )}
 
       </main>
+    </>
+  );
+}
+
+// Small inline link to open diagnostics when there are clips visible
+function DiagnosticsInline({ cutterId, cutterName }: { cutterId: string; cutterName: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <>
+      {" "}
+      <button
+        onClick={() => setShow(p => !p)}
+        className="underline hover:text-foreground transition-colors"
+      >
+        {show ? "Diagnose ausblenden" : "Nicht sichtbare Clips anzeigen →"}
+      </button>
+      {show && (
+        <div className="mt-2 -mx-3">
+          <DiagnosticsPanel cutterId={cutterId} cutterName={cutterName} />
+        </div>
+      )}
     </>
   );
 }

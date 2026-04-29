@@ -34,10 +34,10 @@ async function dbQuery(sql: string, args: unknown[] = []) {
   return r?.response?.result ?? { rows: [], cols: [] };
 }
 
-/** Run ALTER TABLE safely — silently ignores "already has a column" errors. */
+/** Run ALTER TABLE safely — silently ignores "already has a column" / "duplicate column" errors. */
 async function dbAlter(sql: string) {
   try { await dbQuery(sql); } catch (e) {
-    if (!(e instanceof Error) || !e.message.includes('already has a column')) throw e;
+    if (!(e instanceof Error) || (!e.message.includes('already has a column') && !e.message.includes('duplicate column'))) throw e;
   }
 }
 

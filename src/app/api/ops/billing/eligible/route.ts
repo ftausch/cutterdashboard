@@ -45,7 +45,7 @@ async function dbQuery(sql: string, args: unknown[] = []) {
 
 async function dbAlter(sql: string) {
   try { await dbQuery(sql); } catch (e) {
-    if (!(e instanceof Error) || !e.message.includes('already has a column')) throw e;
+    if (!(e instanceof Error) || (!e.message.includes('already has a column') && !e.message.includes('duplicate column'))) throw e;
   }
 }
 

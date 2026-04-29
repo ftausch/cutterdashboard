@@ -122,7 +122,14 @@ export async function GET(request: NextRequest) {
        AND COALESCE(v.is_flagged, 0) = 0
        AND (v.billing_status IS NULL OR v.billing_status NOT IN ('included_in_batch', 'invoiced'))
        ${dateClause}
-     HAVING verified_views > billed_baseline
+       AND (
+         CASE
+           WHEN v.proof_status IN ('proof_approved')
+             OR  v.verification_status IN ('verified', 'manual_proof')
+             THEN COALESCE(v.observed_views, v.current_views, v.claimed_views, 0)
+           ELSE 0
+         END
+       ) > COALESCE(v.views_at_last_invoice, 0)
      ORDER BY v.platform ASC, clip_date DESC`,
     [cutter_id, ...extraArgs]
   );
